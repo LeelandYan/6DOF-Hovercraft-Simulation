@@ -1,4 +1,4 @@
-%% JEFF-B 气垫船 6-DOF 仿真 (SI 单位制版本)
+%% 气垫船 6-DOF 仿真 
 clear; clc; close all;
 
 %% 1. 初始状态定义
@@ -24,7 +24,7 @@ r0 = 0;      % 艏摇角速度 (rad/s)
 X0 = [x0, y0, z0, phi0, theta0, psi0, u0, v0, w0, p0, q0, r0];
 
 %% 2. 调用求解器
-t_span = [0 100]; % 仿真时长(秒)
+t_span = [0 300]; % 仿真时长(秒)
 options = odeset('RelTol', 1e-4, 'AbsTol', 1e-6);
 
 fprintf('进行气垫船6自由度仿真...\n');

@@ -86,14 +86,14 @@ function dXdt = model_jeff_b(t, X)
 %     propeller_speed_rpm = 0;
     
     if t > 50
-        rudder_angle_deg = 0;
+        rudder_angle_deg = 5;
     else
         rudder_angle_deg = 0;
     end
 
     rudder_angle_rad = deg2rad(rudder_angle_deg);
     
-    true_wind_speed_si = 3;       % 真风速
+    true_wind_speed_si = 0;       % 真风速
     true_wind_direction_si = deg2rad(0);   % 真风来向
     
 
@@ -217,7 +217,7 @@ function dXdt = model_jeff_b(t, X)
     
     %% --- 6. 气垫与水动力 ---
 
-    %% --- [修改] 6. 气垫动力学 (基于物理模型) ---
+    %% --- 气垫动力学 ---
     % 使用 persistent 变量记忆上一时刻的围裙状态和压强
     persistent P_last_psf SD_curr_ft t_last
     
@@ -234,7 +234,7 @@ function dXdt = model_jeff_b(t, X)
     if dt_step > 0.1, dt_step = 0.01; end % 限制最大步长
     t_last = t;
 
-    % --- A. 几何运动学解算 (计算各气室物理高度) ---
+    % --- 几何运动学解算 (计算各气室物理高度) ---
     z_ned = X(3); % 垂向位移 (向下为正)
     h_hull_ft = zeros(4,1);
     
@@ -245,7 +245,7 @@ function dXdt = model_jeff_b(t, X)
         h_hull_ft(i) = h_local_m * M2FT; % 转为 ft
     end
 
-    % --- B. 围裙动力学 (计算泄流面积 S) ---
+    % --- 围裙动力学 (计算泄流面积 S) ---
     S_vec_ft2 = zeros(4,1);
     for i = 1:4
         % 计算压强偏差 -> 目标深度
@@ -265,7 +265,7 @@ function dXdt = model_jeff_b(t, X)
         S_vec_ft2(i) = L_per_cushion_ft * CLR;
     end
 
-    % --- C. 调用气体压力求解器 ---
+    % --- 调用气体压力求解器 ---
     dzdt_ft = - w * M2FT; % 垂向速度 (ft/s), 用于泵吸效应
     
     % 调用外部函数 calc_cushion_pressure
@@ -275,7 +275,7 @@ function dXdt = model_jeff_b(t, X)
     % 更新记忆变量
     P_last_psf = P_internal_psf;
 
-    % --- D. 计算气垫力与力矩 (积分) ---
+    % --- 计算气垫力与力矩 (积分) ---
     % 气垫升力 (N)
     F_lift_N = P_cushion_Pa * (Area_cushion_ft2 * FT2M^2); 
     
@@ -300,7 +300,6 @@ function dXdt = model_jeff_b(t, X)
     end
 
     
-
     % 水阻力
     CD_skirt = 0.25;
     Area_wet_surge = 50 * (FT2M^2);
