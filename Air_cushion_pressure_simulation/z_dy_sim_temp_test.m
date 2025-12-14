@@ -1,0 +1,259 @@
+close all
+clear all
+clc
+
+%% ==================== 1. 单位换算常数 ====================
+m_to_ft = 3.28084;          % 长度：m -> ft
+ft_to_m = 1/m_to_ft;
+kg_to_slugs = 0.0685218;    % 质量：kg -> slugs
+N_to_lbf = 0.224809;        % 力：N -> lbf
+psf_to_pa = 47.8803;        % 压强：psf -> Pa
+
+%% ==================== 2. 参数设置 ====================
+% --- 船体参数 ---
+mass_kg = 158774;           % 输入质量 (kg) [对应原文 10879.5 slugs]
+mass_slugs = mass_kg * kg_to_slugs; 
+
+% --- 气垫几何参数 ---
+Area_cushion_m2 = 74.32;    % 单个气室面积 (m^2) [对应原文 800 ft^2]
+Area_cushion_ft2 = Area_cushion_m2 * m_to_ft^2; 
+
+% 围裙周长
+L_per_cushion_m = 42.67;    % 输入周长 (m) [对应原文 140 ft]
+L_per_cushion_ft = L_per_cushion_m * m_to_ft; 
+
+% --- 围裙动力学参数 (Skirt Dynamics) ---
+% 1. 平衡状态围裙深度 
+SD_equilibrium_m = 1.37;    % 输入深度 (m) [对应原文 4.5 ft] 
+SD_equilibrium_ft = SD_equilibrium_m * m_to_ft; 
+
+% 2. 平衡压强
+P_equilibrium_pa = 5218.9;  % 输入压强 (Pa) [对应原文 109 psf]
+P_equilibrium_psf = P_equilibrium_pa / psf_to_pa;
+
+% 3. 经验系数 (使用原文数值)
+C_SKRT = 0.0112;            % 围裙刚度参数 
+TC = 8.0;                   % 围裙响应时间常数/增益 
+
+% --- 初始状态 ---
+z0_si = 0.0;                % 初始船底高度 (m)
+v0_si = 0;                  % 初始垂直速度 (m/s)
+
+% --- 风机转速 (RPM) ---
+N_FAN1 = 2000;      
+N_FAN2 = 2000;
+
+% --- 仿真参数 ---
+dt = 0.01;          
+t_total = 15;               % 模拟时长 (s)
+max_iter_pressure = 50; 
+tol_pressure = 10;    
+
+%% ==================== 3. 变量初始化 ====================
+N_steps = round(t_total / dt);
+t_hist = zeros(N_steps, 1);
+z_hist = zeros(N_steps, 1);         % 船壳高度 (m)
+gap_hist = zeros(N_steps, 1);       % 围裙底部气隙 (m)
+skirt_len_hist = zeros(N_steps, 1); % 围裙长度 (m)
+v_hist = zeros(N_steps, 1);       
+P_hist = zeros(N_steps, 6);         % 压强 (Pa)
+F_lift_hist = zeros(N_steps, 1);    % 升力 (N)
+
+z_curr_si = z0_si;
+v_curr_si = v0_si;
+
+% 围裙状态初始化
+% 假设初始时刻围裙处于完全伸展状态
+SD_curr = [SD_equilibrium_ft; SD_equilibrium_ft; SD_equilibrium_ft; SD_equilibrium_ft]; 
+
+% 压强初值猜测 
+P_last_iter = [0; 0; 0; 0; 0; 0]; 
+
+fprintf('气垫船动力学仿真...\n');
+
+%% ==================== 4. 迭代循环 ====================
+for k = 1:N_steps
+    t = (k-1) * dt;
+    
+    % --- 1. 单位转换  ---
+    z_curr_ft = z_curr_si * m_to_ft;
+    dzdt_ft = v_curr_si * m_to_ft;
+    
+    % --- 2. 围裙动力学计算 ---
+    if k == 1
+        P_cushion_last = [0;0;0;0];
+    else
+        % 将历史记录的 Pa 转回 psf 
+        P_cushion_last = P_hist(k-1, 1:4)' / psf_to_pa; 
+    end
+    
+    S_vec_ft2 = zeros(4,1);
+    current_gaps_ft = zeros(4,1);
+    
+    for i = 1:4
+        % A. 计算压强偏差 Yn (单位: psf)
+        % 压强越高，Yn越负，围裙向上收缩
+        Y_n = P_equilibrium_psf - P_cushion_last(i); 
+        
+        % B. 约束 Yn 范围
+        if Y_n > 66.9, Y_n = 66.9; end
+        if Y_n < -66.9, Y_n = -66.9; end
+        
+        % C. 计算目标围裙深度 SDPRO (ft)
+        SDPRO = 4.5 + C_SKRT * Y_n - 8.325e-7 * (Y_n^3);
+        
+        % D. 围裙动态响应
+        SDDT = (SDPRO - SD_curr(i)) * TC; 
+        SD_curr(i) = SD_curr(i) + SDDT * dt;
+        
+        % E. 计算物理间隙 (ft)
+        % SAW = 船壳高度 - 围裙长度
+        SAW = z_curr_ft - SD_curr(i);
+        
+        % F. 处理接触状态
+        if SAW <= 0
+            CLR = 1e-6; % 接触密封
+        else
+            CLR = SAW;  % 产生气隙
+        end
+        
+        current_gaps_ft(i) = CLR;
+        
+        % G. 计算泄流面积 (ft^2)
+        S_vec_ft2(i) = L_per_cushion_ft * CLR;
+    end
+    
+    % --- 3. 求解气室压强  ---
+    [P_solved_psf, converged] = solve_pressure(P_last_iter, S_vec_ft2, N_FAN1, N_FAN2, ...
+                                               dzdt_ft, Area_cushion_ft2, ... 
+                                               max_iter_pressure, tol_pressure);
+    
+    P_last_iter = P_solved_psf; 
+    
+    % --- 4. 计算受力  ---
+    F_lift_lbs = sum(P_solved_psf(1:4)) * Area_cushion_ft2;
+    
+    F_cursion_N = F_lift_lbs / N_to_lbf;
+    F_gravity_N = mass_kg * 9.81;
+    F_z_N = F_cursion_N - F_gravity_N;
+    
+    % --- 5. 运动积分 ---
+    z_acc_si = F_z_N / mass_kg;
+    v_next_si = v_curr_si + z_acc_si * dt;
+    z_next_si = z_curr_si + v_next_si * dt;
+    
+    if z_next_si < 0, z_next_si = 0; v_next_si = 0; end
+    
+    % --- 6. 数据记录  ---
+    t_hist(k) = t;
+    z_hist(k) = z_curr_si;                      % 船壳高度 (m)
+    gap_hist(k) = current_gaps_ft(1) * ft_to_m; % 气隙高度 (m)
+    skirt_len_hist(k) = SD_curr(1) * ft_to_m;   % 围裙长度 (m)
+    v_hist(k) = v_curr_si;
+    P_hist(k, :) = P_solved_psf' * psf_to_pa;   % 压强 (Pa)
+    F_lift_hist(k) = F_cursion_N;
+    
+    z_curr_si = z_next_si;
+    v_curr_si = v_next_si;
+end
+
+%% ==================== 结果打印 ====================
+fprintf('\n----------------------------------------\n');
+fprintf('仿真结束。\n 最终状态:\n');
+fprintf('----------------------------------------\n');
+for i = 1:4
+    fprintf('  气室 %d 压强: %10.2f Pa\n', i, P_hist(end, i));
+end
+fprintf('----------------------------------------\n');
+fprintf('  船壳最终高度: %10.2f m\n', z_hist(end));
+fprintf('  风机转速设定值: %d RPM\n', N_FAN1);
+fprintf('\n');
+
+
+%% ==================== 5. 结果绘图 ====================
+% --- 图1：船体运动与几何状态 ---
+figure('Name', 'Heave Dynamics', 'NumberTitle', 'off');
+plot(t_hist, z_hist, 'b-', 'LineWidth', 2); hold on;
+plot(t_hist, gap_hist, 'r--', 'LineWidth', 1.5);
+% plot(t_hist, skirt_len_hist, 'g:', 'LineWidth', 1.5);
+legend('船壳离地高度 ', '围裙底部气隙', 'Location', 'Best');
+ylabel('高度 (m)'); xlabel('时间 (s)');
+title('垫升过程仿真 - 高度动态');
+grid on;
+
+% --- 图2：四个气室压强 ---
+figure('Name', 'Cushion Pressures', 'NumberTitle', 'off');
+for i = 1:4
+    subplot(2, 2, i);
+    plot(t_hist, P_hist(:, i), 'k-', 'LineWidth', 1.5);
+    ylabel('压强 (Pa)'); xlabel('时间 (s)');
+    title(['气室 ' num2str(i) ' 压强变化']);
+    grid on;
+    axis tight; 
+    ylim_curr = ylim;
+    ylim([ylim_curr(1)*0.9, ylim_curr(2)*1.1]);
+end
+
+%% ==================== 牛顿迭代法 ====================
+function [P_solved, converged] = solve_pressure(P_init, S_vec, N1, N2, dzdt, Area, max_it, tol)
+    P = P_init;
+    converged = false;
+    lambda = 0.6; 
+    for i = 1:max_it
+        J = compute_jacobian(P, S_vec, N1, N2, dzdt, Area);
+        F = residual_function(P, S_vec, N1, N2, dzdt, Area);
+        if norm(F) < tol, converged = true; break; end
+        delta = -J \ F;
+        P = P + lambda * delta;
+        P = max(P, 1.0); 
+    end
+    P_solved = P;
+end
+
+function J = compute_jacobian(P, S, N1, N2, dzdt, Area)
+    eps_pert = 1e-4;
+    n = 6;
+    J = zeros(n, n);
+    F0 = residual_function(P, S, N1, N2, dzdt, Area);
+    for k = 1:n
+        P_tmp = P;
+        P_tmp(k) = P_tmp(k) + eps_pert;
+        F_pert = residual_function(P_tmp, S, N1, N2, dzdt, Area);
+        J(:, k) = (F_pert - F0) / eps_pert;
+    end
+end
+
+function F = residual_function(P, S, N_FAN1, N_FAN2, dzdt, Area)
+    
+    Q_FAN1 = (-1280 * sqrt(abs(P(5) - 300)) * sign(P(5) - 300) - 31.6 * (P(5) - 300)) * N_FAN1 / 2000;
+    Q_FAN2 = (-1280 * sqrt(abs(P(6) - 300)) * sign(P(6) - 300) - 31.6 * (P(6) - 300)) * N_FAN2 / 2000;
+
+    Q_INC1 = 589 * sqrt(abs(P(5) - P(1))) * sign(P(5) - P(1));
+    Q_INC2 = 589 * sqrt(abs(P(5) - P(2))) * sign(P(5) - P(2));
+    Q_INC3 = 589 * sqrt(abs(P(6) - P(3))) * sign(P(6) - P(3));
+    Q_INC4 = 589 * sqrt(abs(P(6) - P(4))) * sign(P(6) - P(4));
+
+    Q_NOZ1 = -346 * sqrt(abs(P(5))) * sign(P(5));
+    Q_NOZ2 = -346 * sqrt(abs(P(6))) * sign(P(6));
+
+    Q_IC1 = 675 * sqrt(abs(P(4) - P(1))) * sign(P(4) - P(1));
+    Q_IC2 = 338 * sqrt(abs(P(1) - P(2))) * sign(P(1) - P(2));
+    Q_IC3 = 675 * sqrt(abs(P(2) - P(3))) * sign(P(2) - P(3));
+    Q_IC4 = 338 * sqrt(abs(P(3) - P(4))) * sign(P(3) - P(4));
+
+    Q1 = -S(1) * 14.5 * sqrt(abs(P(1))) * sign(P(1));
+    Q2 = -S(2) * 14.5 * sqrt(abs(P(2))) * sign(P(2));
+    Q3 = -S(3) * 14.5 * sqrt(abs(P(3))) * sign(P(3));
+    Q4 = -S(4) * 14.5 * sqrt(abs(P(4))) * sign(P(4));
+
+    Q_PUMP = Area * dzdt;
+
+    F = zeros(6, 1);
+    
+    F(5) = -Q_INC1 - Q_INC2 + Q_NOZ1 + Q_FAN1;
+    F(6) = -Q_INC3 - Q_INC4 + Q_NOZ2 + Q_FAN2;
+    F(1) = Q_INC1 + Q_IC1 - Q_IC2 + Q1 - Q_PUMP;
+    F(2) = Q_INC2 + Q_IC2 - Q_IC3 + Q2 - Q_PUMP;
+    F(3) = Q_INC3 + Q_IC3 - Q_IC4 + Q3 - Q_PUMP;
+    F(4) = Q_INC4 + Q_IC4 - Q_IC1 + Q4 - Q_PUMP;
+end

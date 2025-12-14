@@ -1,0 +1,12 @@
+# MATLAB 自动生成的备份和缓存文件
+*.asv
+*.autosave
+*.slxc
+slprj/
+
+# 忽略 Windows 文件夹生成的缩略图缓存
+Thumbs.db
+
+# 如果你的 'Air_cushion...' 文件夹里有巨大的仿真数据(.mat)，
+# 且不需要版本控制，可以把下面这行的 # 去掉
+# *.mat
