@@ -40,8 +40,8 @@ z0_si = 0.0;                % 初始船底高度 (m)
 v0_si = 0;                  % 初始垂直速度 (m/s)
 
 % --- 风机转速 (RPM) ---
-N_FAN1 = 2000;      
-N_FAN2 = 2000;
+N_FAN1 = 1800;      
+N_FAN2 = 1800;
 
 % --- 仿真参数 ---
 dt = 0.01;          
@@ -58,6 +58,7 @@ skirt_len_hist = zeros(N_steps, 1); % 围裙长度 (m)
 v_hist = zeros(N_steps, 1);       
 P_hist = zeros(N_steps, 6);         % 压强 (Pa)
 F_lift_hist = zeros(N_steps, 1);    % 升力 (N)
+acc_hist = zeros(N_steps, 1);
 
 z_curr_si = z0_si;
 v_curr_si = v0_si;
@@ -152,6 +153,7 @@ for k = 1:N_steps
     v_hist(k) = v_curr_si;
     P_hist(k, :) = P_solved_psf' * psf_to_pa;   % 压强 (Pa)
     F_lift_hist(k) = F_cursion_N;
+    acc_hist(k) = z_acc_si;
     
     z_curr_si = z_next_si;
     v_curr_si = v_next_si;
@@ -193,6 +195,25 @@ for i = 1:4
     ylim_curr = ylim;
     ylim([ylim_curr(1)*0.9, ylim_curr(2)*1.1]);
 end
+
+% --- 图3：升沉速度与加速度 ---
+figure('Name', 'Heave Kinematics', 'NumberTitle', 'off');
+
+% 子图1：升沉速度
+subplot(2, 1, 1); % 2行1列，第1个图
+plot(t_hist, v_hist, 'b-', 'LineWidth', 1.5);
+ylabel('垂直速度 (m/s)');
+xlabel('时间 (s)');
+title('升沉方向 - 速度变化');
+grid on;
+
+% 子图2：升沉加速度
+subplot(2, 1, 2); % 2行1列，第2个图
+plot(t_hist, acc_hist, 'r-', 'LineWidth', 1.5);
+ylabel('垂直加速度 (m/s^2)');
+xlabel('时间 (s)');
+title('升沉方向 - 加速度变化');
+grid on;
 
 %% ==================== 牛顿迭代法 ====================
 function [P_solved, converged] = solve_pressure(P_init, S_vec, N1, N2, dzdt, Area, max_it, tol)

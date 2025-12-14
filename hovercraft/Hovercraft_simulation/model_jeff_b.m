@@ -47,7 +47,30 @@ function dXdt = model_jeff_b(t, X)
     DUCT_AREA_si = 123 * (FT2M^2);
     X3_PROP_si = -2.5; % 螺旋桨安装高度
 
-
+    %% --- [新增] 气垫几何与动力学参数 ---
+    % 1. 气垫分布几何 (相对于重心, m)
+    L_cush = 38.5 * FT2M; % 气室半长
+    W_cush = 17.5 * FT2M; % 气室半宽
+    % 气室中心坐标 [x, y] (1:右前, 2:左前, 3:右后, 4:左后)
+    Pos_cush = [
+         L_cush/2,  W_cush/2; 
+         L_cush/2, -W_cush/2; 
+        -L_cush/2,  W_cush/2; 
+        -L_cush/2, -W_cush/2
+    ];
+    
+    % 2. 围裙与风机参数 (英制)
+    L_per_cushion_ft = 140;         % 单个气室周长
+    Area_cushion_ft2 = 800;         % 单个气室面积
+    SD_equilibrium_ft = 4.5;        % 平衡围裙深度
+    P_equilibrium_psf = 109;        % 平衡压强
+    H_base_m = 5.0 * FT2M;          % 硬结构离水面基准高度 (z=0时的HoW)
+    
+    C_SKRT = 0.0112;                % 围裙刚度系数
+    TC = 8.0;                       % 围裙响应时间常数
+    
+    N_FAN_L = 1800;                 % 左风机转速 RPM
+    N_FAN_R = 1800;                 % 右风机转速 RPM
     
     
     %% --- 3. 控制输入 ---
@@ -70,15 +93,15 @@ function dXdt = model_jeff_b(t, X)
 
     rudder_angle_rad = deg2rad(rudder_angle_deg);
     
-    ture_wind_speed_si = 0;       % 真风速
-    true_wind_direction_si = deg2rad(180);   % 真风来向
+    true_wind_speed_si = 3;       % 真风速
+    true_wind_direction_si = deg2rad(0);   % 真风来向
     
 
 %% --- 4. 空气阻力计算  ---    
     % --- 相对风计算(Apparent Wind) Eq.60-63 ---
     % 将真风速度分解到固定坐标系 (NED)
-    V_wind_north = ture_wind_speed_si * cos(true_wind_direction_si + pi);
-    V_wind_east  = ture_wind_speed_si * sin(true_wind_direction_si + pi);
+    V_wind_north = true_wind_speed_si * cos(true_wind_direction_si + pi);
+    V_wind_east  = true_wind_speed_si * sin(true_wind_direction_si + pi);
     
     % 将真风速度分量转换到船体坐标系
     u_wind_body = V_wind_north * cos(psi) + V_wind_east * sin(psi);
@@ -193,22 +216,92 @@ function dXdt = model_jeff_b(t, X)
     RPITCH_si = X3R_si * RDRAG_si;
     
     %% --- 6. 气垫与水动力 ---
-    F_cushion_static_si = m_kg * g_SI;
+
+    %% --- [修改] 6. 气垫动力学 (基于物理模型) ---
+    % 使用 persistent 变量记忆上一时刻的围裙状态和压强
+    persistent P_last_psf SD_curr_ft t_last
     
-    K_heave_si = 20000 * LBF2N * M2FT; 
-    C_heave_si = 5000  * LBF2N * M2FT;
-    K_pitch_si = 4.0e7 * LBF2N * FT2M; 
-    C_pitch_si = 5.0e6 * LBF2N * FT2M;
-    K_roll_si  = 1.5e6 * LBF2N * FT2M;
-    C_roll_si  = 2.0e5 * LBF2N * FT2M;
+    % 初始化 (t=0 或重置时)
+    if isempty(P_last_psf) || t == 0
+        P_last_psf = zeros(6,1); 
+        SD_curr_ft = ones(4,1) * SD_equilibrium_ft; 
+        t_last = t;
+    end
     
-    % 气垫力与力矩
-    FX3CT_si = -F_cushion_static_si - (K_heave_si * X(3) + C_heave_si * w);
-    FX4CT_si = -(K_roll_si * phi + C_roll_si * p);
-    FX5CT_si = -(K_pitch_si * theta + C_pitch_si * q);
+    % 计算动态时间步长 dt
+    dt_step = t - t_last;
+    if dt_step < 0, dt_step = 0; end
+    if dt_step > 0.1, dt_step = 0.01; end % 限制最大步长
+    t_last = t;
+
+    % --- A. 几何运动学解算 (计算各气室物理高度) ---
+    z_ned = X(3); % 垂向位移 (向下为正)
+    h_hull_ft = zeros(4,1);
+    
+    for i = 1:4
+        % 计算气室中心的离水高度 (m)
+        % h = 基准 - 沉降 + 纵摇影响 - 横摇影响
+        h_local_m = (H_base_m - z_ned) + Pos_cush(i,1)*sin(theta) - Pos_cush(i,2)*sin(phi);
+        h_hull_ft(i) = h_local_m * M2FT; % 转为 ft
+    end
+
+    % --- B. 围裙动力学 (计算泄流面积 S) ---
+    S_vec_ft2 = zeros(4,1);
+    for i = 1:4
+        % 计算压强偏差 -> 目标深度
+        Y_n = P_equilibrium_psf - P_last_psf(i);
+        Y_n = max(min(Y_n, 66.9), -66.9); % 限幅
+        SDPRO = 4.5 + C_SKRT * Y_n - 8.325e-7 * (Y_n^3);
+        
+        % 状态积分: 更新围裙长度
+        SDDT = (SDPRO - SD_curr_ft(i)) * TC;
+        SD_curr_ft(i) = SD_curr_ft(i) + SDDT * dt_step;
+        
+        % 计算物理气隙 (Gap)
+        SAW = h_hull_ft(i) - SD_curr_ft(i);
+        CLR = max(SAW, 1e-4); % 最小气隙保护
+        
+        % 泄流面积
+        S_vec_ft2(i) = L_per_cushion_ft * CLR;
+    end
+
+    % --- C. 调用气体压力求解器 ---
+    dzdt_ft = - w * M2FT; % 垂向速度 (ft/s), 用于泵吸效应
+    
+    % 调用外部函数 calc_cushion_pressure
+    [P_cushion_Pa, P_internal_psf] = calc_cushion_pressure(...
+        [N_FAN_R, N_FAN_L], S_vec_ft2', dzdt_ft, P_last_psf);
+    
+    % 更新记忆变量
+    P_last_psf = P_internal_psf;
+
+    % --- D. 计算气垫力与力矩 (积分) ---
+    % 气垫升力 (N)
+    F_lift_N = P_cushion_Pa * (Area_cushion_ft2 * FT2M^2); 
+    
+    % 1. 垂向力 (NED系, 向上为负)
+    FX3CT_si = -sum(F_lift_N); 
+    
+    % 2. 力矩 (Pitch & Roll)
+    FX5CT_si = 0; % Pitch Moment
+    FX4CT_si = 0; % Roll Moment
+    
+    for i = 1:4
+        % 力臂
+        x_arm = Pos_cush(i,1);
+        y_arm = Pos_cush(i,2);
+        F_i = F_lift_N(i);
+        
+        % 纵摇力矩 (+q 抬头): 前部(x>0)受力向上 -> 力矩为正
+        FX5CT_si = FX5CT_si + (F_i * x_arm);
+        
+        % 横摇力矩 (+p 右倾): 右侧(y>0)受力向上 -> 力矩为负
+        FX4CT_si = FX4CT_si - (F_i * y_arm);
+    end
+
     
 
-    % 水动阻力
+    % 水阻力
     CD_skirt = 0.25;
     Area_wet_surge = 50 * (FT2M^2);
     Area_wet_sway  = 80 * (FT2M^2);

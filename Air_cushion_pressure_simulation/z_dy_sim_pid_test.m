@@ -67,6 +67,7 @@ skirt_len_hist = zeros(N_steps, 1); % 围裙长度 (m)
 v_hist = zeros(N_steps, 1);       
 P_hist = zeros(N_steps, 6);         % 压强 (Pa)
 F_lift_hist = zeros(N_steps, 1);    % 升力 (N)
+acc_hist = zeros(N_steps, 1);
 
 z_curr_si = z0_si;
 v_curr_si = v0_si;
@@ -208,6 +209,7 @@ for k = 1:N_steps
     v_hist(k) = v_curr_si;
     P_hist(k, :) = P_solved_psf' * psf_to_pa;   % 压强 (Pa)
     F_lift_hist(k) = F_cursion_N;
+    acc_hist(k) = z_acc_si;
     
     z_curr_si = z_next_si;
     v_curr_si = v_next_si;
@@ -251,23 +253,41 @@ for i = 1:4
 end
 
 % --- 图3：PID 控制效果 ---
-figure('Name', 'PID Control Performance', 'NumberTitle', 'off');
+% figure('Name', 'PID Control Performance', 'NumberTitle', 'off');
+% 
+% subplot(2,1,1);
+% plot(t_hist, z_hist, 'b-', 'LineWidth', 2); hold on;
+% yline(z_target, 'r--');
+% ylabel('高度 (m)'); grid on;
+% legend('实际高度', '目标高度');
+% title('高度响应');
+% 
+% subplot(2,1,2);
+% plot(t_hist, N_hist, 'k-', 'LineWidth', 1.5); hold on;
+% yline(N_max, 'r:', 'Max RPM');
+% yline(N_min, 'r:', 'Min RPM');
+% ylabel('风机转速 (RPM)'); xlabel('时间 (s)');
+% title('风机转速调节');
+% grid on;
 
-subplot(2,1,1);
-plot(t_hist, z_hist, 'b-', 'LineWidth', 2); hold on;
-yline(z_target, 'r--');
-ylabel('高度 (m)'); grid on;
-legend('实际高度', '目标高度');
-title('高度响应');
+% --- 图4：升沉速度与加速度 ---
+figure('Name', 'Heave Kinematics', 'NumberTitle', 'off');
 
-subplot(2,1,2);
-plot(t_hist, N_hist, 'k-', 'LineWidth', 1.5); hold on;
-yline(N_max, 'r:', 'Max RPM');
-yline(N_min, 'r:', 'Min RPM');
-ylabel('风机转速 (RPM)'); xlabel('时间 (s)');
-title('风机转速调节');
+% 子图1：升沉速度
+subplot(2, 1, 1); % 2行1列，第1个图
+plot(t_hist, v_hist, 'b-', 'LineWidth', 1.5);
+ylabel('垂直速度 (m/s)');
+xlabel('时间 (s)');
+title('升沉方向 - 速度变化');
 grid on;
 
+% 子图2：升沉加速度
+subplot(2, 1, 2); % 2行1列，第2个图
+plot(t_hist, acc_hist, 'r-', 'LineWidth', 1.5);
+ylabel('垂直加速度 (m/s^2)');
+xlabel('时间 (s)');
+title('升沉方向 - 加速度变化');
+grid on;
 
 
 
@@ -322,6 +342,7 @@ function F = residual_function(P, S, N_FAN1, N_FAN2, dzdt, Area)
     Q2 = -S(2) * 14.5 * sqrt(abs(P(2))) * sign(P(2));
     Q3 = -S(3) * 14.5 * sqrt(abs(P(3))) * sign(P(3));
     Q4 = -S(4) * 14.5 * sqrt(abs(P(4))) * sign(P(4));
+
 
     Q_PUMP = Area * dzdt;
 
