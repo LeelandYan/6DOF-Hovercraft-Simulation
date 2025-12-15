@@ -1,13 +1,13 @@
-%% 气垫船 6-DOF 仿真 
+%% 气垫船6DOF仿真 
 clear; clc; close all;
 
-%% 1. 初始状态定义
+%% 初始状态定义
 % 状态向量 X = [x, y, z, phi, theta, psi, u, v, w, p, q, r]
 
 % --- 位置与姿态 ---
 x0 = 0;      % 北向位置 (m)
 y0 = 0;      % 东向位置 (m)
-z0 = 0.15;      % 垂向位移 (m)
+z0 = 0;   % 垂向位移 (m)
 phi0 = 0;    % 横摇角 (rad)
 theta0 = 0;  % 纵摇角 (rad)
 psi0 = deg2rad(0); % 初始艏向 (rad)，0度为正北
@@ -23,15 +23,15 @@ r0 = 0;      % 艏摇角速度 (rad/s)
 % 组装初始状态向量
 X0 = [x0, y0, z0, phi0, theta0, psi0, u0, v0, w0, p0, q0, r0];
 
-%% 2. 调用求解器
-t_span = [0 300]; % 仿真时长(秒)
+%% 调用求解器
+t_span = [0 200]; % 仿真时长(秒)
 options = odeset('RelTol', 1e-4, 'AbsTol', 1e-6);
 
 fprintf('进行气垫船6自由度仿真...\n');
 
 [t, sol] = ode45(@model_jeff_b, t_span, X0, options);
 
-%% 3. 数据解包
+%% 数据解包
 % 位置 (m)
 x_pos = sol(:,1);
 y_pos = sol(:,2);
@@ -50,109 +50,74 @@ w = sol(:,9);
 % 角速度 (rad/s -> deg/s)
 r_rate_deg = rad2deg(sol(:,12));
 
-%% --- 气垫压强复现 (Post-Processing) ---
-% 说明：利用解算出的运动状态(sol)，重新调用物理模型来计算每一时刻的真实压强。
-
-% 1. 准备常数 (必须与 model_jeff_b 保持一致)
-FT2M = 0.3048; M2FT = 1/FT2M;
-L_cush = 38.5 * FT2M; W_cush = 17.5 * FT2M;
-H_base_m = 5.0 * FT2M; 
-L_per_cushion_ft = 140;
-P_equilibrium_psf = 109;
-C_SKRT = 0.0112; TC = 8.0;
-N_FAN = [1800, 1800]; % 风机转速
-
-% 气室中心坐标
-Pos_cush = [L_cush/2, W_cush/2; L_cush/2, -W_cush/2; -L_cush/2, W_cush/2; -L_cush/2, -W_cush/2];
-
-% 2. 初始化记录数组
+%% --- 气垫压强---
+% 初始化
 num_steps = length(t);
-P_hist_Pa = zeros(num_steps, 4); % 记录4个气室压强
+P_hist_Pa = zeros(num_steps, 4); % 用于存储四个气室的压强
+clear model_jeff_b; 
 
-% 3. 状态重演循环
-% 我们需要模拟 model_jeff_b 中的围裙动态积分过程
-SD_curr_ft = ones(4,1) * 4.5; % 初始围裙长度 (ft)
-P_last_psf = zeros(6,1);      % 初始内部压强状态
-
+% 循环调用函数提取压强
 for k = 1:num_steps
-    % A. 获取当前时刻状态
-    z_ned = sol(k, 3); 
-    phi = sol(k, 4);   
-    theta = sol(k, 5); 
-    w_vel = sol(k, 9); 
+    t_curr = t(k);
+    X_curr = sol(k, :)'; % 取出当前时刻的状态向量 
     
-    % 计算时间步长 (ode45是变步长的)
-    if k > 1
-        dt = t(k) - t(k-1);
-    else
-        dt = 0;
-    end
+    [~, P_out] = model_jeff_b(t_curr, X_curr);
     
-    S_vec_ft2 = zeros(4,1);
-    
-    % B. 重复 model_jeff_b 中的物理计算逻辑
-    for i = 1:4
-        % 计算气室中心物理高度
-        h_local_m = (H_base_m - z_ned) + Pos_cush(i,1)*sin(theta) - Pos_cush(i,2)*sin(phi);
-        h_hull_ft = h_local_m * M2FT;
-        
-        % 围裙动力学积分
-        Y_n = P_equilibrium_psf - P_last_psf(i);
-        Y_n = max(min(Y_n, 66.9), -66.9);
-        SDPRO = 4.5 + C_SKRT * Y_n - 8.325e-7 * (Y_n^3);
-        
-        if k > 1 % 只有时间流逝才积分
-            SDDT = (SDPRO - SD_curr_ft(i)) * TC;
-            SD_curr_ft(i) = SD_curr_ft(i) + SDDT * dt;
-        end
-        
-        % 计算气隙和面积
-        SAW = h_hull_ft - SD_curr_ft(i);
-        CLR = max(SAW, 1e-4);
-        S_vec_ft2(i) = L_per_cushion_ft * CLR;
-    end
-    
-    % C. 调用压力求解器 (注意 dzdt 的符号修正: -w)
-    dzdt_ft = -w_vel * M2FT; 
-    [P_pa_out, P_state_out] = calc_cushion_pressure(N_FAN, S_vec_ft2', dzdt_ft, P_last_psf);
-    
-    % D. 记录数据
-    P_hist_Pa(k, :) = P_pa_out;
-    P_last_psf = P_state_out; % 更新状态供下一步使用
+    % 记录数据 
+    P_hist_Pa(k, :) = P_out(:)'; 
 end
 
+
 % 赋值给绘图变量
-P_FL = P_hist_Pa(:,1);
-P_FR = P_hist_Pa(:,2);
-P_RL = P_hist_Pa(:,3);
-P_RR = P_hist_Pa(:,4);
-P_static_si = 5218; % 绘图参考线 (109 psf)
+P_FL = P_hist_Pa(:,1); % 前左
+P_FR = P_hist_Pa(:,2); % 前右
+P_RL = P_hist_Pa(:,3); % 后左
+P_RR = P_hist_Pa(:,4); % 后右
+
+P_static_si = 5218; % 绘图参考线
 
 
-%% 4. 绘图结果
+%% 绘图
 % --- 运动学状态 ---
 figure('Name', 'Kinematics', 'Color', 'w');
 
-subplot(3,2,1); plot(t, u, 'LineWidth', 1.5); 
-title('纵向速度 u (m/s)'); grid on; xlabel('时间 (s)');
-
-subplot(3,2,2); plot(t, v, 'LineWidth', 1.5); 
-title('横向速度 v (m/s)'); grid on; xlabel('时间 (s)');
-
-subplot(3,2,3); 
-plot(t, z_pos - z_pos(1), 'LineWidth', 1.5); 
-title('升沉位移(m)'); 
-grid on; xlabel('时间 (s)');
+subplot(2,2,1); 
+plot(t, u, 'LineWidth', 1.5); 
+title('纵向速度 u (m/s)'); 
+grid on; 
+xlabel('时间 (s)');
 
 
-subplot(3,2,4); plot(t, r_rate_deg, 'LineWidth', 1.5); 
-title('艏摇率 r (deg/s)'); grid on; xlabel('时间 (s)');
+subplot(2,2,2); 
+plot(t, v, 'LineWidth', 1.5); 
+title('横向速度 v (m/s)'); 
+grid on; 
+xlabel('时间 (s)');
+ylim([-10, 10]);
 
-subplot(3,2,5); plot(t, -phi_deg, 'LineWidth', 1.5); 
-title('横摇角 Roll (deg)'); grid on; xlabel('时间 (s)');
+% subplot(3,2,3); 
+% plot(t, (z_pos - z_pos(1)) * 100, 'LineWidth', 1.5); 
+% title('气隙高度(cm)'); 
+% grid on; xlabel('时间 (s)');
 
-subplot(3,2,6); plot(t, theta_deg, 'LineWidth', 1.5); 
-title('纵摇角 Pitch (deg)'); grid on; xlabel('时间 (s)');
+
+% subplot(3,2,3); plot(t, r_rate_deg, 'LineWidth', 1.5); 
+% title('艏摇率 r (deg/s)'); grid on; xlabel('时间 (s)');
+% ylim([-2, 2]);
+
+
+subplot(2,2,3); 
+plot(t, phi_deg, 'LineWidth', 1.5); 
+title('横摇角 Roll (deg)'); grid on; 
+xlabel('时间 (s)');
+ylim([-1.5, 1.5]);
+
+subplot(2,2,4); 
+plot(t, theta_deg, 'LineWidth', 1.5); 
+title('纵摇角 Pitch (deg)'); 
+grid on; 
+xlabel('时间 (s)');
+% ylim([-2, 2]);
 
 % --- 运动轨迹 ---
 figure('Name', 'Trajectory', 'Color', 'w');
@@ -164,7 +129,7 @@ xlabel('东向 East (m)'); ylabel('北向 North (m)');
 title('气垫船运动轨迹 (JEFF-B)');
 axis equal; grid on; legend show;
 
-%% --- 气垫压强绘图---
+%气垫压强绘图
 figure('Name', 'Cushion Pressure Distribution', 'Color', 'w');
 
 % 转换单位 Pa -> kPa 

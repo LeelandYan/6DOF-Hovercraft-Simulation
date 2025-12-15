@@ -1,5 +1,5 @@
 function [P_cushion_Pa, P_internal_state] = calc_cushion_pressure(N_FAN, S_leak_ft2, dzdt_ft_s, P_guess_psf)
-% CALC_CUSHION_PRESSURE 计算气垫船气室压强 (纯气体动力学部分)
+% CALC_CUSHION_PRESSURE 计算气垫船气室压强
 %
 % 输入参数:
 %   N_FAN       : [1x2] 向量, 左右风机转速 (RPM), 例如 [1800, 1800]
@@ -12,10 +12,11 @@ function [P_cushion_Pa, P_internal_state] = calc_cushion_pressure(N_FAN, S_leak_
 %
 % 输出参数:
 %   P_cushion_Pa   : [1x4] 向量, 底部4个气室的最终压强 (帕斯卡 Pa)
+
 %   P_internal_state : [6x1] 向量, 包含风机管道和气室的完整压强状态 (psf)
 %                      (可作为下一时刻的 P_guess_psf 输入)
 
-    %% 1. 常数定义 (保持与原文一致的英制系数)
+    %% 常数定义 
     Area_cushion_ft2 = 800; % 单个气室面积 (对应原文 74.32 m^2)
     psf_to_pa = 47.8803;    % 单位转换系数
     
@@ -24,9 +25,9 @@ function [P_cushion_Pa, P_internal_state] = calc_cushion_pressure(N_FAN, S_leak_
     tol = 20; % 容差
     lambda = 0.6; % 牛顿法步长因子
 
-    %% 2. 准备输入
+    %% 检查输入
     if nargin < 4 || isempty(P_guess_psf)
-        P = ones(6,1) * 10; % 防止由0启动导致的奇异
+        P = ones(6,1) * 10; 
     else
         P = P_guess_psf;
     end
@@ -37,7 +38,7 @@ function [P_cushion_Pa, P_internal_state] = calc_cushion_pressure(N_FAN, S_leak_
     % 泄流面积向量 S
     S = S_leak_ft2; 
 
-    %% 3. 牛顿-拉夫逊迭代求解 (Newton-Raphson Solver)
+    %% 牛顿迭代求解
     converged = false;
     
     for k = 1:max_iter
@@ -50,14 +51,13 @@ function [P_cushion_Pa, P_internal_state] = calc_cushion_pressure(N_FAN, S_leak_
             break; 
         end
         
-        % 计算雅可比矩阵 J (数值微分法)
+        % 计算雅可比矩阵
         J = compute_jacobian(P, S, N1, N2, dzdt_ft_s, Area_cushion_ft2);
         
         % 更新步长
         delta = -J \ F;
         P = P + lambda * delta;
         
-        % 物理约束：绝对压强不能为负 (防止迭代发散)
         P = max(P, 0.1); 
     end
     
@@ -65,20 +65,18 @@ function [P_cushion_Pa, P_internal_state] = calc_cushion_pressure(N_FAN, S_leak_
         warning('Pressure solver did not converge within max iterations.');
     end
 
-    %% 4. 输出处理
+    %% 输出处理
     P_internal_state = P; % 保持 psf 单位用于下一次迭代
     
-    % 提取底部4个气室的压强 (索引1-4) 并转换为 Pa
+    % 提取底部4个气室的压强并转换为 Pa
     P_cushion_psf = P(1:4);
     P_cushion_Pa = P_cushion_psf' * psf_to_pa;
 
 end
 
-%% ================= 子函数：残差计算 =================
 function F = residual_function(P, S, N1, N2, dzdt, Area)
     % P(1-4): 气室压强, P(5-6): 风机管道压强
     
-    % --- 风机特性方程 (Fan Map) ---
     % 对应原文 Q_FAN 公式
     term1_1 = -1280 * signed_sqrt(P(5) - 300);
     term1_2 = -31.6 * (P(5) - 300);
@@ -88,35 +86,32 @@ function F = residual_function(P, S, N1, N2, dzdt, Area)
     term2_2 = -31.6 * (P(6) - 300);
     Q_FAN2 = (term2_1 + term2_2) * N2 / 2000;
 
-    % --- 管道流动方程 (Orifice Flow) ---
-    % Q = Coeff * Area * sqrt(dP)
     % 风机管道 -> 气室
     Q_INC1 = 589 * signed_sqrt(P(5) - P(1));
     Q_INC2 = 589 * signed_sqrt(P(5) - P(2));
     Q_INC3 = 589 * signed_sqrt(P(6) - P(3));
     Q_INC4 = 589 * signed_sqrt(P(6) - P(4));
 
-    % 姿态控制喷管 (Nozzles)
+    % 姿态控制喷管
     Q_NOZ1 = -346 * signed_sqrt(P(5));
     Q_NOZ2 = -346 * signed_sqrt(P(6));
 
-    % 气室间横流 (Inter-chamber Flow)
+    % 气室间横流
     Q_IC1 = 675 * signed_sqrt(P(4) - P(1));
     Q_IC2 = 338 * signed_sqrt(P(1) - P(2));
     Q_IC3 = 675 * signed_sqrt(P(2) - P(3));
     Q_IC4 = 338 * signed_sqrt(P(3) - P(4));
 
-    % 底部泄流 (Leakage to Atmosphere)
-    % 系数 14.5 对应 discharge coeff
+    % 底部泄流
     Q1 = -S(1) * 14.5 * signed_sqrt(P(1));
     Q2 = -S(2) * 14.5 * signed_sqrt(P(2));
     Q3 = -S(3) * 14.5 * signed_sqrt(P(3));
     Q4 = -S(4) * 14.5 * signed_sqrt(P(4));
 
-    % 波浪泵吸 (Wave Pumping / Volume Change)
+    % 泵吸
     Q_PUMP = Area * dzdt;
 
-    % --- 流量平衡方程 (Continuity Eq) ---
+    % 流量平衡方程
     F = zeros(6, 1);
     
     % 风机管道节点平衡
@@ -130,7 +125,6 @@ function F = residual_function(P, S, N1, N2, dzdt, Area)
     F(4) = Q_INC4 + Q_IC4 - Q_IC1 + Q4 - Q_PUMP;
 end
 
-%% ================= 子函数：雅可比矩阵 =================
 function J = compute_jacobian(P, S, N1, N2, dzdt, Area)
     eps_pert = 1e-4; % 扰动步长
     n = 6;

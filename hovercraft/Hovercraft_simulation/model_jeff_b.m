@@ -1,4 +1,4 @@
-function dXdt = model_jeff_b(t, X) 
+function [dXdt, P_cushion_out] = model_jeff_b(t, X) 
     %% --- 单位转换系数 ---
     FT2M = 0.3048;          % feet to meters
     SLUG2KG = 14.5939;      % slugs to kg
@@ -33,22 +33,39 @@ function dXdt = model_jeff_b(t, X)
     Izz = Izz_imp * SLUG2KG * (FT2M^2);
     
     % 空气阻力作用点
-    X1SC = 30.0 * FT2M;    % 纵向偏移 (x)
-    X2SC = 0 * FT2M;       % 横向偏移 (y)
-    X3SC = -8.0 * FT2M;    % 垂向偏移 (z)
+    X_air_pos_si = 30.0 * FT2M;    % 纵向偏移 (x)
+    Z_air_pos_si = -8.0 * FT2M;    % 垂向偏移 (z)
 
     
     % 几何参数
-    X1R_si = -67.1 * FT2M;      % 舵 X 位置
-    X3R_si = -8.0 * FT2M;        % 舵 Z 位置
+    X_rudder_pos_si = -67.1 * FT2M;       % 舵 X 位置
+    Z_rudder_pos_si = -8.0 * FT2M;        % 舵 Z 位置
     RSAREA_si = 47.2 * (FT2M^2);  
     SCAREA_si = 3200 * (FT2M^2);  
     FCAREA_si = 836 * (FT2M^2);   
     DUCT_AREA_si = 123 * (FT2M^2);
-    X3_PROP_si = -2.5; % 螺旋桨安装高度
+    Z_PROP_si = -2; % 螺旋桨安装高度
 
-    %% --- [新增] 气垫几何与动力学参数 ---
-    % 1. 气垫分布几何 (相对于重心, m)
+
+    %% --- 3. 控制输入 ---
+    propeller_angle = 15;
+
+    propeller_speed_rpm = 1250;
+
+    
+    if t > 10
+        rudder_angle_deg = -3;
+    else
+        rudder_angle_deg = 0;
+    end
+
+    rudder_angle_rad = deg2rad(rudder_angle_deg);
+    
+    true_wind_speed_si = 0;       % 真风速
+    true_wind_direction_si = deg2rad(0);   % 真风来向
+
+    %% --- 气垫几何与动力学参数 ---
+    % 气垫分布几何 
     L_cush = 38.5 * FT2M; % 气室半长
     W_cush = 17.5 * FT2M; % 气室半宽
     % 气室中心坐标 [x, y] (1:右前, 2:左前, 3:右后, 4:左后)
@@ -59,7 +76,7 @@ function dXdt = model_jeff_b(t, X)
         -L_cush/2, -W_cush/2
     ];
     
-    % 2. 围裙与风机参数 (英制)
+    % 围裙与风机参数
     L_per_cushion_ft = 140;         % 单个气室周长
     Area_cushion_ft2 = 800;         % 单个气室面积
     SD_equilibrium_ft = 4.5;        % 平衡围裙深度
@@ -69,32 +86,23 @@ function dXdt = model_jeff_b(t, X)
     C_SKRT = 0.0112;                % 围裙刚度系数
     TC = 8.0;                       % 围裙响应时间常数
     
-    N_FAN_L = 1800;                 % 左风机转速 RPM
-    N_FAN_R = 1800;                 % 右风机转速 RPM
-    
-    
-    %% --- 3. 控制输入 ---
-%     if t < 5
-%         propeller_angle = 15 * (t/5);
-%     else
-%         propeller_angle = 25;
-%     end
+%     N_FAN_L = 1500;                 % 左风机转速 RPM
+%     N_FAN_R = 1500;                 % 右风机转速 RPM    
 
-    propeller_angle = 15;
-
-    propeller_speed_rpm = 1250;
-%     propeller_speed_rpm = 0;
+    Target_RPM = 1500;
+    Run_Up_Time = 10.0; % 设定5秒达到全速
     
-    if t > 50
-        rudder_angle_deg = 5;
+    if t < Run_Up_Time
+        Current_RPM = Target_RPM * (t / Run_Up_Time);
     else
-        rudder_angle_deg = 0;
+        Current_RPM = Target_RPM;
     end
-
-    rudder_angle_rad = deg2rad(rudder_angle_deg);
     
-    true_wind_speed_si = 0;       % 真风速
-    true_wind_direction_si = deg2rad(0);   % 真风来向
+    N_FAN_L = Current_RPM; 
+    N_FAN_R = Current_RPM;
+
+    
+
     
 
 %% --- 4. 空气阻力计算  ---    
@@ -149,38 +157,31 @@ function dXdt = model_jeff_b(t, X)
     else
         YDRAG = 1.67e-3 ; % 保持常数
     end
-%     if apparent_wind_angle_deg < 0, YDRAG = -YDRAG; end
 
-    % --- 4.3 空气阻力与力矩计算 Eq.73-77 ---
+    % --- 空气阻力与力矩计算 Eq.73-77 ---
     q_bar = 0.5 * rho_air_SI * apparent_wind_velocity_si^2; % 动压
-    LCUSH_si = 77.0 * FT2M;             % 气垫长度 
 
     % 空气阻力计算
     % Eq.73: XBDRAG (纵向空气阻力) 
-    XBDRAG_si = -FDRAG * FCAREA_si * q_bar;
+    X_air_si = -FDRAG * FCAREA_si * q_bar;
     
     % Eq.74: YBDRAG (横向空气阻力) 
-    YBDRAG_si = -SDRAG * SCAREA_si * q_bar; 
+    Y_air_si = -SDRAG * SCAREA_si * q_bar; 
 
     % 力矩 (Moments)
     % Eq.75: Pitch Moment
-    PITCHA_si = XBDRAG_si * X3SC;  
+    My_air_si = X_air_si * Z_air_pos_si;  
     
     % Eq.76: Roll Moment 
-    ROLLA_si  = -YBDRAG_si * X3SC;
+    Mx_air_si  = -Y_air_si * Z_air_pos_si;
     
     % Eq.77: Yaw Moment 
-%     YAWBD_si = (YDRAG * SCAREA_si * LCUSH_si * q_bar) ...
-%              + (YBDRAG_si * X1SC);
-     YAWBD_si = YBDRAG_si * X1SC;
+%     Mz_air_si = (YDRAG * SCAREA_si * LCUSH_si * q_bar) ...
+%              + (Y_air_si * X_air_pos_si);
+     Mz_air_si = Y_air_si * X_air_pos_si;
     
 
-    %% --- 5. 推进与操纵力计算 ---
-%     Thrust_one_lbf = (338 * propeller_angle + 4.36 * propeller_angle^2) * (propeller_speed_rpm/1250)^2;
-%     Thrust_one_si = Thrust_one_lbf * LBF2N;
-%     
-%     propeller_thrust_si = 2 * Thrust_one_si;
- 
+    %% --- 5. 推进与舵力计算 ---
     XWIND_ft_s = -u_rel * M2FT; 
     XWIND_val = XWIND_ft_s; 
     Thrust_base = (338 * propeller_angle + 4.36 * propeller_angle^2);
@@ -193,8 +194,7 @@ function dXdt = model_jeff_b(t, X)
     % 总推力
     propeller_thrust_si = 2 * Thrust_one_si;
 
-    PITCH_THRUST_si = propeller_thrust_si * X3_PROP_si;
-
+    My_propeller_si = propeller_thrust_si * Z_PROP_si;
     
     % 舵力
     VDUCT2_si = (apparent_wind_velocity_si * cos(apparent_wind_angle_rad))^2 + Thrust_one_si / (rho_air_SI * DUCT_AREA_si);
@@ -204,24 +204,22 @@ function dXdt = model_jeff_b(t, X)
     CLIFT_R = 0.053 * rudder_angle_deg;
     CDRAG_R = 0.422e-3 * rudder_angle_deg^2;
     
-    RDRAG_si = -CDRAG_R * RSAREA_si * 2 * PDUCT_si;
-    RLIFT_si = CLIFT_R * RSAREA_si * 2 * PDUCT_si;
+    X_rudder_si = -CDRAG_R * RSAREA_si * 2 * PDUCT_si;
+    Y_rudder_si = CLIFT_R * RSAREA_si * 2 * PDUCT_si;
     
     % 舵力矩
-    % Mz(Yaw) = F_y * x
-    RYAW_si   = X1R_si * RLIFT_si;
-    % Mx(Roll) = F_y * z
-    RROLL_si  = -X3R_si * RLIFT_si;
-    % My(Pitch) = F_x * z
-    RPITCH_si = X3R_si * RDRAG_si;
+    % Mx
+    Mx_rudder_si  = -Z_rudder_pos_si * Y_rudder_si;
+    % My
+    My_rudder_si  = Z_rudder_pos_si * X_rudder_si;
+    % Mz
+    Mz_rudder_si  = X_rudder_pos_si * Y_rudder_si;
     
-    %% --- 6. 气垫与水动力 ---
-
-    %% --- 气垫动力学 ---
-    % 使用 persistent 变量记忆上一时刻的围裙状态和压强
+    %% --- 6. 气垫力 ---
+    % 记忆上一时刻的围裙状态和压强
     persistent P_last_psf SD_curr_ft t_last
     
-    % 初始化 (t=0 或重置时)
+    % 初始化 
     if isempty(P_last_psf) || t == 0
         P_last_psf = zeros(6,1); 
         SD_curr_ft = ones(4,1) * SD_equilibrium_ft; 
@@ -234,7 +232,7 @@ function dXdt = model_jeff_b(t, X)
     if dt_step > 0.1, dt_step = 0.01; end % 限制最大步长
     t_last = t;
 
-    % --- 几何运动学解算 (计算各气室物理高度) ---
+    % 计算各气室物理高度
     z_ned = X(3); % 垂向位移 (向下为正)
     h_hull_ft = zeros(4,1);
     
@@ -245,7 +243,7 @@ function dXdt = model_jeff_b(t, X)
         h_hull_ft(i) = h_local_m * M2FT; % 转为 ft
     end
 
-    % --- 围裙动力学 (计算泄流面积 S) ---
+    % 计算泄流面积
     S_vec_ft2 = zeros(4,1);
     for i = 1:4
         % 计算压强偏差 -> 目标深度
@@ -266,66 +264,74 @@ function dXdt = model_jeff_b(t, X)
     end
 
     % --- 调用气体压力求解器 ---
-    dzdt_ft = - w * M2FT; % 垂向速度 (ft/s), 用于泵吸效应
+    dzdt_ft = - w * M2FT; % 垂向速度
     
-    % 调用外部函数 calc_cushion_pressure
+    % 调用函数calc_cushion_pressure
     [P_cushion_Pa, P_internal_psf] = calc_cushion_pressure(...
         [N_FAN_R, N_FAN_L], S_vec_ft2', dzdt_ft, P_last_psf);
     
     % 更新记忆变量
     P_last_psf = P_internal_psf;
 
-    % --- 计算气垫力与力矩 (积分) ---
-    % 气垫升力 (N)
+    % 气垫力与力矩
+    % 气垫升力
     F_lift_N = P_cushion_Pa * (Area_cushion_ft2 * FT2M^2); 
     
-    % 1. 垂向力 (NED系, 向上为负)
-    FX3CT_si = -sum(F_lift_N); 
+    % 垂向力(向上为负)
+    Z_cursion_si = -sum(F_lift_N); 
     
-    % 2. 力矩 (Pitch & Roll)
-    FX5CT_si = 0; % Pitch Moment
-    FX4CT_si = 0; % Roll Moment
+    % 力矩 
+    My_cursion_si = 0; % Pitch 
+    Mx_cursion_si = 0; % Roll 
     
     for i = 1:4
         % 力臂
         x_arm = Pos_cush(i,1);
         y_arm = Pos_cush(i,2);
         F_i = F_lift_N(i);
+
         
-        % 纵摇力矩 (+q 抬头): 前部(x>0)受力向上 -> 力矩为正
-        FX5CT_si = FX5CT_si + (F_i * x_arm);
-        
-        % 横摇力矩 (+p 右倾): 右侧(y>0)受力向上 -> 力矩为负
-        FX4CT_si = FX4CT_si - (F_i * y_arm);
+        % 纵摇力矩
+        My_cursion_si = My_cursion_si + (F_i * x_arm);
+        % 横摇力矩 
+        Mx_cursion_si = Mx_cursion_si - (F_i * y_arm);
+
     end
 
-    
-    % 水阻力
+
+
+    % 航行面阻力
     CD_skirt = 0.25;
     Area_wet_surge = 50 * (FT2M^2);
     Area_wet_sway  = 80 * (FT2M^2);
     Rho_water = 1025;
     
-    SDRX_si = -0.5 * Rho_water * CD_skirt * Area_wet_surge * u * abs(u);
-    SDRY_si = -0.5 * Rho_water * CD_skirt * Area_wet_sway  * v * abs(v);
+    X_skirt_si = -0.5 * Rho_water * CD_skirt * Area_wet_surge * u * abs(u);
+    Y_skirt_si = -0.5 * Rho_water * CD_skirt * Area_wet_sway  * v * abs(v);
+
+
+    Z_arm_skirt = 1.5; % 阻力作用点到重心的垂直距离 (米)
+    Mx_skirt_moment = -Z_arm_skirt * Y_skirt_si;
+    Roll_Damping_Coeff = 5e5; % [可调参数] 建议范围 1e5 ~ 5e5
+    Mx_damping = -Roll_Damping_Coeff * p;
     
     YAWDC_coeff_si = 2.77e6 * LBF2N * FT2M;
-    YAWDC_si = -YAWDC_coeff_si * r;
+    Mz_skirt_si = -YAWDC_coeff_si * r;    
     
     %% --- 7. 总力与力矩汇总 ---
     % 重力在各轴分量，近似线性
-    XGRAV_si = -m_kg * g_SI * theta;
-    YGRAV_si =  m_kg * g_SI * phi;
-    ZGRAV_si =  m_kg * g_SI;
+    X_G_si = -m_kg * g_SI * theta;
+    Y_G_si =  m_kg * g_SI * phi;
+    Z_G_si =  m_kg * g_SI;
     
-    % 合力与合力矩公式：
-    Fx = propeller_thrust_si + RDRAG_si + XBDRAG_si + SDRX_si + XGRAV_si;
-    Fy = RLIFT_si + YBDRAG_si + SDRY_si + YGRAV_si;
-    Fz = FX3CT_si + ZGRAV_si;
+    % 合力与合力矩
+    Fx = X_rudder_si + X_air_si  + X_G_si + propeller_thrust_si + X_skirt_si;
+    Fy = Y_rudder_si + Y_air_si  + Y_G_si + Y_skirt_si;
+    Fz = Z_cursion_si + Z_G_si;
     
-    Mx = FX4CT_si + ROLLA_si + RROLL_si;
-    My = FX5CT_si + PITCHA_si + RPITCH_si + PITCH_THRUST_si;
-    Mz = YAWBD_si + RYAW_si + YAWDC_si;
+    Mx = Mx_cursion_si + Mx_air_si + Mx_rudder_si + Mx_skirt_moment + Mx_damping;
+    My = My_cursion_si + My_air_si + My_rudder_si + My_propeller_si;
+    Mz = Mz_air_si + Mz_rudder_si + Mz_skirt_si;
     
     %% --- 8. 动力学方程 ---    
     udot = Fx/m_kg - q*w + r*v;
@@ -348,4 +354,7 @@ function dXdt = model_jeff_b(t, X)
     %% --- 输出 ---
     dXdt = [dx; dy; dz; dphi; dtheta; dpsi; ...
             udot; vdot; wdot; pdot; qdot; rdot];
+
+    P_cushion_out = P_cushion_Pa;
+
 end
