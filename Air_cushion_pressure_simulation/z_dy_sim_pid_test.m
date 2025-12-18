@@ -11,23 +11,23 @@ psf_to_pa = 47.8803;        % 压强：psf -> Pa
 
 %% ==================== 2、参数设置 ====================
 % --- 船体参数 ---
-mass_kg = 158774;           % 输入质量 (kg) [对应原文 10879.5 slugs]
+mass_kg = 158774;           % 输入质量 (kg) 
 mass_slugs = mass_kg * kg_to_slugs; 
 
 % --- 气垫几何参数 ---
-Area_cushion_m2 = 74.32;    % 单个气室面积 (m^2) [对应原文 800 ft^2]
+Area_cushion_m2 = 74.32;    % 单个气室面积 (m^2) 
 Area_cushion_ft2 = Area_cushion_m2 * m_to_ft^2; 
 
 % 围裙周长
-L_per_cushion_m = 42.67;    % 输入周长 (m) [对应原文 140 ft]
+L_per_cushion_m = 42.67;   
 L_per_cushion_ft = L_per_cushion_m * m_to_ft; 
 
 % --- 围裙参数  ---
-skirt_length_stable_m = 1.37;    % 平衡状态围裙长(m) [对应原文 4.5 ft] 
+skirt_length_stable_m = 1.37;    % 平衡状态围裙长(m) 
 skirt_length_stable_ft = skirt_length_stable_m * m_to_ft; 
 
 % 平衡压强
-P_stable_pa = 5218.9;  % 输入压强 (Pa) [对应原文 109 psf]
+P_stable_pa = 5218.9;  
 P_stable_psf = P_stable_pa / psf_to_pa;
 
 % 围裙经验系数 
@@ -252,25 +252,8 @@ for i = 1:4
     ylim([ylim_curr(1)*0.9, ylim_curr(2)*1.1]);
 end
 
-% --- 图3：PID 控制效果 ---
-% figure('Name', 'PID Control Performance', 'NumberTitle', 'off');
-% 
-% subplot(2,1,1);
-% plot(t_hist, z_hist, 'b-', 'LineWidth', 2); hold on;
-% yline(z_target, 'r--');
-% ylabel('高度 (m)'); grid on;
-% legend('实际高度', '目标高度');
-% title('高度响应');
-% 
-% subplot(2,1,2);
-% plot(t_hist, N_hist, 'k-', 'LineWidth', 1.5); hold on;
-% yline(N_max, 'r:', 'Max RPM');
-% yline(N_min, 'r:', 'Min RPM');
-% ylabel('风机转速 (RPM)'); xlabel('时间 (s)');
-% title('风机转速调节');
-% grid on;
 
-% --- 图4：升沉速度与加速度 ---
+% --- 图3：升沉速度与加速度 ---
 figure('Name', 'Heave Kinematics', 'NumberTitle', 'off');
 
 % 子图1：升沉速度

@@ -12,11 +12,11 @@ psf_to_pa = 47.8803;        % 压强：psf -> Pa
 
 %% ==================== 2. 物理参数设置 ====================
 % --- 船体参数 ---
-mass_slugs = 10879.5; 
+mass_slugs = 10879.5;  % 158,767.5kg
 mass_kg = mass_slugs / kg_to_slugs; 
 
 % 气垫底部面积 (每个舱室)
-Area_cushion_ft2 = 800; 
+Area_cushion_ft2 = 800;  % 800m2
 
 % 围裙周长 (用于简化计算泄流面积 S = L * h)
 L_per_cushion_ft = 140; 

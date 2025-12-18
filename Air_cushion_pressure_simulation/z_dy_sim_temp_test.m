@@ -22,9 +22,9 @@ Area_cushion_ft2 = Area_cushion_m2 * m_to_ft^2;
 L_per_cushion_m = 42.67;    % 输入周长 (m) [对应原文 140 ft]
 L_per_cushion_ft = L_per_cushion_m * m_to_ft; 
 
-% --- 围裙动力学参数 (Skirt Dynamics) ---
-% 1. 平衡状态围裙深度 
-SD_equilibrium_m = 1.37;    % 输入深度 (m) [对应原文 4.5 ft] 
+% --- 围裙动力学参数 ---
+% 1. 平衡状态围裙长度 
+SD_equilibrium_m = 1.37;   
 SD_equilibrium_ft = SD_equilibrium_m * m_to_ft; 
 
 % 2. 平衡压强
@@ -92,7 +92,7 @@ for k = 1:N_steps
     current_gaps_ft = zeros(4,1);
     
     for i = 1:4
-        % A. 计算压强偏差 Yn (单位: psf)
+        % A. 计算压强偏差 Yn 
         % 压强越高，Yn越负，围裙向上收缩
         Y_n = P_equilibrium_psf - P_cushion_last(i); 
         
@@ -100,7 +100,7 @@ for k = 1:N_steps
         if Y_n > 66.9, Y_n = 66.9; end
         if Y_n < -66.9, Y_n = -66.9; end
         
-        % C. 计算目标围裙深度 SDPRO (ft)
+        % C. 计算目标围裙长度 SDPRO (ft)
         SDPRO = 4.5 + C_SKRT * Y_n - 8.325e-7 * (Y_n^3);
         
         % D. 围裙动态响应
@@ -215,7 +215,7 @@ xlabel('时间 (s)');
 title('升沉方向 - 加速度变化');
 grid on;
 
-%% ==================== 牛顿迭代法 ====================
+%% ==================== 牛顿迭代 ====================
 function [P_solved, converged] = solve_pressure(P_init, S_vec, N1, N2, dzdt, Area, max_it, tol)
     P = P_init;
     converged = false;

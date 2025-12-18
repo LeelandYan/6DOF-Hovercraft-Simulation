@@ -4,17 +4,13 @@ function [P_cushion_Pa, P_internal_state] = calc_cushion_pressure(N_FAN, S_leak_
 % 输入参数:
 %   N_FAN       : [1x2] 向量, 左右风机转速 (RPM), 例如 [1800, 1800]
 %   S_leak_ft2  : [1x4] 向量, 4个气室的底部泄流面积 (平方英尺)
-%                 (如果只做纯风机特性测试，可设为常数)
 %   dzdt_ft_s   : 标量, 船体垂直升沉速度 (英尺/秒) 
-%                 (用于计算波浪泵吸效应，稳态可设为 0)
 %   P_guess_psf : [6x1] 向量, 压强初值猜测 (psf)
-%                 (用于加速牛顿迭代收敛，若无先验值可全设为 0)
 %
 % 输出参数:
 %   P_cushion_Pa   : [1x4] 向量, 底部4个气室的最终压强 (帕斯卡 Pa)
 
 %   P_internal_state : [6x1] 向量, 包含风机管道和气室的完整压强状态 (psf)
-%                      (可作为下一时刻的 P_guess_psf 输入)
 
     %% 常数定义 
     Area_cushion_ft2 = 800; % 单个气室面积 (对应原文 74.32 m^2)
