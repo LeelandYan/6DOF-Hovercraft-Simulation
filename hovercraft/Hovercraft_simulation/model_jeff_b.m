@@ -1,4 +1,4 @@
-function [dXdt, P_cushion_out] = model_jeff_b(t, X) 
+function [dXdt, P_cushion_out] = model_jeff_b(t, X, cmd_rudder_angle) 
     %% --- 单位转换系数 ---
     FT2M = 0.3048;          % feet to meters
     SLUG2KG = 14.5939;      % slugs to kg
@@ -32,8 +32,8 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X)
     Izz = Izz_imp * SLUG2KG * (FT2M^2);
     
     % 空气阻力作用点
-    X_air_pos_si = -3.0;    % 纵向偏移 (x)
-    Z_air_pos_si = -2.0 ;    % 垂向偏移 (z)
+    X_air_pos_si = 3;    % 纵向偏移 (x)
+    Z_air_pos_si = -3.0 ;    % 垂向偏移 (z)
 
     
     % 几何参数
@@ -43,35 +43,35 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X)
     SCAREA_si = 3200 * (FT2M^2);  
     FCAREA_si = 836 * (FT2M^2);   
     DUCT_AREA_si = 123 * (FT2M^2);
-    Z_propeller_pos_si = -2; % 螺旋桨安装高度
+    Z_propeller_pos_si = -3; % 螺旋桨安装高度
 
 
     %% 控制输入 
     propeller_angle = 15;
 
 %     propeller_speed_rpm = 1200;
-    if t > 30
-        propeller_speed_rpm = 0;
+    if t > 10
+        propeller_speed_rpm = 1200;
     else
-        propeller_speed_rpm = 0;
+        propeller_speed_rpm = 1200;
     end
 
     
-    if t > 60
-        rudder_angle_deg = 0;
+    if t > 30
+        rudder_angle_deg = cmd_rudder_angle;
     else
         rudder_angle_deg = 0;
     end
 
     rudder_angle_rad = deg2rad(rudder_angle_deg);
     
-    true_wind_speed_si = 0;       % 真风速
-    true_wind_direction_si = deg2rad(0);   % 真风来向
+    true_wind_speed_si = 3;       % 真风速
+    true_wind_direction_si = deg2rad(90);   % 真风来向
 
     %% 气垫几何参数
     % 气垫分布几何 
-    L_cush = 38.5 * FT2M; % 气室半长
-    W_cush = 17.5 * FT2M; % 气室半宽
+    L_cush = 38.5 * FT2M; % 单气室长11.73m
+    W_cush = 17.5 * FT2M; % 单气室宽5.3m
 
     % 气室中心坐标
     Pos_cush = [
@@ -86,7 +86,7 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X)
     Area_cushion_ft2 = 800;         % 单个气室面积
     SD_equilibrium_ft = 4.5;        % 平衡围裙深度
     P_equilibrium_psf = 109;        % 平衡压强
-    H_base_m = 5.0 * FT2M;          % 硬结构离水面基准高度 (z=0时的HoW)
+    H_base_m = 5.0 * FT2M;          % 硬结构离水面基准高度
     
     C_SKRT = 0.0112;                % 围裙刚度系数
     TC = 8.0;                       % 围裙响应时间常数
@@ -94,7 +94,7 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X)
 %     N_FAN_L = 1500;                 % 左风机转速 RPM
 %     N_FAN_R = 1500;                 % 右风机转速 RPM    
 
-    Target_RPM = 1500;
+    Target_RPM = 1800;
 %     Run_Up_Time = 20.0; 
 %     
 %     if t < Run_Up_Time
@@ -103,9 +103,9 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X)
 %         Current_RPM = Target_RPM;
 %     end
 
-    Run_Up_Time = 30.0;
+    Run_Up_Time = 60.0;
     if t < Run_Up_Time
-        Current_RPM = Target_RPM * (1 - exp(-t/1));  % 指数上升，更平滑
+        Current_RPM = Target_RPM * (1 - exp(-0.5 * t/1));  % 指数上升，更平滑
     else
         Current_RPM = Target_RPM;
     end
@@ -226,7 +226,7 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X)
     % Mz
     Mz_rudder_si  = X_rudder_pos_si * Y_rudder_si;
     
-    %% 气垫力 
+%% 气垫力 
     % 记忆上一时刻的围裙状态和压强
     persistent P_last_psf SD_curr_ft t_last
     
@@ -247,16 +247,25 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X)
     z_ned = X(3); % 垂向位移 (向下为正)
     h_hull_ft = zeros(4,1);
     
+    % 【修改点1】初始化一个向量，用来存4个气室的局部垂向速度
+    dzdt_vec_ft = zeros(4,1); 
+    
     for i = 1:4
-        % 计算气室中心的离水高度 (m)
-        % h = 基准 - 沉降 + 纵摇影响 - 横摇影响
-        h_local_m = (H_base_m - z_ned) + Pos_cush(i,1)*sin(theta) - Pos_cush(i,2)*sin(phi);
-        h_hull_ft(i) = h_local_m * M2FT; % 转为 ft
-    end
+        % 获取气室中心相对于重心的坐标 (力臂)
+        x_arm = Pos_cush(i,1);
+        y_arm = Pos_cush(i,2);
 
-    % 计算泄流面积
-    S_vec_ft2 = zeros(4,1);
-    for i = 1:4
+        % 计算高度
+        % h = 基准 - 沉降 + 纵摇影响 - 横摇影响
+        h_local_m = (H_base_m - z_ned) + x_arm*sin(theta) - y_arm*sin(phi);
+        h_hull_ft(i) = h_local_m * M2FT; % 转为 ft
+
+
+   
+        dzdt_local_si = -w + q * x_arm - p * y_arm; 
+        dzdt_vec_ft(i) = dzdt_local_si * M2FT; 
+
+        % 围裙
         % 计算压强偏差 -> 目标深度
         Y_n = P_equilibrium_psf - P_last_psf(i);
         Y_n = max(min(Y_n, 66.9), -66.9); % 限幅
@@ -274,12 +283,8 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X)
         S_vec_ft2(i) = L_per_cushion_ft * CLR;
     end
 
-
-    dzdt_ft = - w * M2FT; % 垂向速度
-    
-    % 调用函数calc_cushion_pressure
     [P_cushion_Pa, P_internal_psf] = calc_cushion_pressure(...
-        [N_FAN_R, N_FAN_L], S_vec_ft2', dzdt_ft, P_last_psf);
+        [N_FAN_R, N_FAN_L], S_vec_ft2', dzdt_vec_ft, P_last_psf);
     
     % 更新记忆变量
     P_last_psf = P_internal_psf;
@@ -296,17 +301,14 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X)
     Mx_cursion_si = 0; % Roll 
     
     for i = 1:4
-        % 力臂
         x_arm = Pos_cush(i,1);
         y_arm = Pos_cush(i,2);
         F_i = F_lift_N(i);
-
         
         % 纵摇力矩
         My_cursion_si = My_cursion_si + (F_i * x_arm);
         % 横摇力矩 
         Mx_cursion_si = Mx_cursion_si - (F_i * y_arm);
-
     end
 
 
@@ -322,10 +324,10 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X)
 
     Z_arm_skirt = 1.5; % 阻力作用点到重心的垂直距离 (米)
     Mx_skirt_moment = -Z_arm_skirt * Y_skirt_si;
-    Roll_Damping_Coeff = 3e3; 
+    Roll_Damping_Coeff = 5e5; 
     Mx_damping = -Roll_Damping_Coeff * p;
 
-    Pitch_Damping_Coeff = 3e6; 
+    Pitch_Damping_Coeff = 2e6; 
     My_damping = - Pitch_Damping_Coeff * q;
     Z_arm_effective = 1.0;
     My_skirt_moment = Z_arm_effective * X_skirt_si;

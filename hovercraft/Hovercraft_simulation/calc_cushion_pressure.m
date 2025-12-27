@@ -34,12 +34,14 @@ function [P_cushion_Pa, P_internal_state] = calc_cushion_pressure(N_FAN, S_leak_
     % 泄流面积向量 S
     S = S_leak_ft2; 
 
+    dzdt_vec = dzdt_ft_s(:);
+
     %% 牛顿迭代求解
     converged = false;
     
     for k = 1:max_iter
         % 计算残差 F
-        F = residual_function(P, S, N1, N2, dzdt_ft_s, Area_cushion_ft2);
+        F = residual_function(P, S, N1, N2, dzdt_vec, Area_cushion_ft2);
         
         % 检查收敛
         if norm(F) < tol
@@ -48,7 +50,7 @@ function [P_cushion_Pa, P_internal_state] = calc_cushion_pressure(N_FAN, S_leak_
         end
         
         % 计算雅可比矩阵
-        J = compute_jacobian(P, S, N1, N2, dzdt_ft_s, Area_cushion_ft2);
+        J = compute_jacobian(P, S, N1, N2, dzdt_vec, Area_cushion_ft2);
         
         % 更新步长
         delta = -J \ F;
@@ -70,7 +72,7 @@ function [P_cushion_Pa, P_internal_state] = calc_cushion_pressure(N_FAN, S_leak_
 
 end
 
-function F = residual_function(P, S, N1, N2, dzdt, Area)
+function F = residual_function(P, S, N1, N2, dzdt_vec, Area)
     % P(1-4): 气室压强, P(5-6): 风机管道压强
     
     % 对应原文 Q_FAN 公式
@@ -105,7 +107,7 @@ function F = residual_function(P, S, N1, N2, dzdt, Area)
     Q4 = -S(4) * 14.5 * signed_sqrt(P(4));
 
     % 泵吸
-    Q_PUMP = Area * dzdt;
+    Q_PUMP = Area * dzdt_vec;
 
     % 流量平衡方程
     F = zeros(6, 1);
@@ -115,22 +117,22 @@ function F = residual_function(P, S, N1, N2, dzdt, Area)
     F(6) = -Q_INC3 - Q_INC4 + Q_NOZ2 + Q_FAN2;
     
     % 气室节点平衡
-    F(1) = Q_INC1 + Q_IC1 - Q_IC2 + Q1 - Q_PUMP;
-    F(2) = Q_INC2 + Q_IC2 - Q_IC3 + Q2 - Q_PUMP;
-    F(3) = Q_INC3 + Q_IC3 - Q_IC4 + Q3 - Q_PUMP;
-    F(4) = Q_INC4 + Q_IC4 - Q_IC1 + Q4 - Q_PUMP;
+    F(1) = Q_INC1 + Q_IC1 - Q_IC2 + Q1 - Q_PUMP(1);
+    F(2) = Q_INC2 + Q_IC2 - Q_IC3 + Q2 - Q_PUMP(2);
+    F(3) = Q_INC3 + Q_IC3 - Q_IC4 + Q3 - Q_PUMP(3);
+    F(4) = Q_INC4 + Q_IC4 - Q_IC1 + Q4 - Q_PUMP(4);
 end
 
-function J = compute_jacobian(P, S, N1, N2, dzdt, Area)
+function J = compute_jacobian(P, S, N1, N2, dzdt_vec, Area)
     eps_pert = 1e-4; % 扰动步长
     n = 6;
     J = zeros(n, n);
-    F0 = residual_function(P, S, N1, N2, dzdt, Area);
+    F0 = residual_function(P, S, N1, N2, dzdt_vec, Area);
     
     for k = 1:n
         P_tmp = P;
         P_tmp(k) = P_tmp(k) + eps_pert;
-        F_pert = residual_function(P_tmp, S, N1, N2, dzdt, Area);
+        F_pert = residual_function(P_tmp, S, N1, N2, dzdt_vec, Area);
         J(:, k) = (F_pert - F0) / eps_pert;
     end
 end

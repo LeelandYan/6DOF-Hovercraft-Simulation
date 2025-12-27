@@ -78,7 +78,7 @@ for k = 1:N_steps
     
     % --- 1. 单位转换  ---
     z_curr_ft = z_curr_si * m_to_ft;
-    dzdt_ft = v_curr_si * m_to_ft;
+    dzdt_ft = v_curr_si * m_to_ft ; % + rand * sin(rand * k);
     
     % --- 2. 围裙动力学计算 ---
     if k == 1
