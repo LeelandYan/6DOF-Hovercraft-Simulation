@@ -24,7 +24,7 @@ X0 = [x0, y0, z0, phi0, theta0, psi0, u0, v0, w0, p0, q0, r0];
 
 %%
 % 控制指令
-rudder_angle = 15; % 舵角指令
+rudder_angle = 5; % 舵角指令
 
 
 %% 使用4阶龙格库塔法
@@ -239,12 +239,14 @@ grid on;
 % 
 % %% 仿真设置
 % % 定义要对比的舵角列表
-% rudder_test_values = [5, 10, 15]; 
-% line_colors = {'b', 'g', 'r'};     % 对应颜色：蓝、绿、红
+% rudder_test_values = [-5, -10, -15]; 
+% % line_colors = {'b', 'g', 'r'};     % 对应颜色：蓝、绿、红
+% fixed_color = 'b';  % 蓝色
+% line_styles = {'-', '-.', ':'};  % 实线、点划线、虚线
 % 
 % % 定义时间步长和总时长
 % dt = 0.1;              
-% T_end = 200;            
+% T_end = 400;            
 % t = 0:dt:T_end;         
 % num_steps = length(t);  
 % 
@@ -286,12 +288,13 @@ grid on;
 %     
 %     % --- 获取当前工况参数 ---
 %     current_angle = rudder_test_values(i);
-%     current_color = line_colors{i};
+% %     fixed_color = line_colors{i};
+%     current_linestyle = line_styles{i};  % 获取当前线型
 %     fprintf('正在进行舵角 = %d 度的仿真...\n', current_angle);
 %     
 %     clear model_jeff_b; 
 %     
-%     % --- 初始状态定义 (每次都要重置) ---
+%     % 初始状态定义
 %     x0 = 0; y0 = 0; z0 = 1.5;   
 %     phi0 = 0; theta0 = 0; psi0 = deg2rad(0); 
 %     u0 = 0; v0 = 0; w0 = 0;     
@@ -332,30 +335,44 @@ grid on;
 % 
 %     % 绘制轨迹 
 %     figure(fig_traj);
-%     plot(y_pos, x_pos, 'LineWidth', 2, 'Color', current_color, ...
-%          'DisplayName', sprintf('舵角 %d^{\\circ}', current_angle));
-%     % 标记终点
-%     plot(y_pos(end), x_pos(end), 's', 'MarkerFaceColor', current_color, 'HandleVisibility', 'off');
+%     plot(y_pos, x_pos, ...
+%         'Color', fixed_color, ...
+%         'LineStyle', current_linestyle, ...
+%         'LineWidth', 2, ...
+%         'DisplayName', sprintf('舵角 %d^{\\circ}', current_angle));
+%     plot(y_pos(end), x_pos(end), 's', 'MarkerFaceColor', fixed_color, 'HandleVisibility', 'off');
 % 
 %     % 绘制侧滑角
 %     figure(fig_beta);
-%     plot(t, beta_deg, 'LineWidth', 1.5, 'Color', current_color, ...
-%          'DisplayName', sprintf('舵角 %d^{\\circ}', current_angle));
+%     plot(t, beta_deg, ...
+%         'Color', fixed_color, ...
+%         'LineStyle', current_linestyle, ...
+%         'LineWidth', 1.5, ...
+%         'DisplayName', sprintf('舵角 %d^{\\circ}', current_angle));
 % 
 %     % 纵向速度
 %     figure(fig_u);
-%     plot(t, u_vel, 'LineWidth', 1.5, 'Color', current_color, ...
-%          'DisplayName', sprintf('舵角 %d^{\\circ}', current_angle));
+%     plot(t, u_vel, ...
+%         'Color', fixed_color, ...
+%         'LineStyle', current_linestyle, ...
+%         'LineWidth', 1.5, ...
+%         'DisplayName', sprintf('舵角 %d^{\\circ}', current_angle));
 % 
 %     % 横向速度
 %     figure(fig_v);
-%     plot(t, v_vel, 'LineWidth', 1.5, 'Color', current_color, ...
-%          'DisplayName', sprintf('舵角 %d^{\\circ}', current_angle));
+%     plot(t, v_vel, ...
+%         'Color', fixed_color, ...
+%         'LineStyle', current_linestyle, ...
+%         'LineWidth', 1.5, ...
+%         'DisplayName', sprintf('舵角 %d^{\\circ}', current_angle));
 % 
 %     % 艏向角
 %     figure(fig_psi);
-%     plot(t, psi_deg_360, 'LineWidth', 1.5, 'Color', current_color, ...
-%          'DisplayName', sprintf('舵角 %d^{\\circ}', current_angle));
+%     plot(t, psi_deg_360, ...
+%         'Color', fixed_color, ...
+%         'LineStyle', current_linestyle, ...
+%         'LineWidth', 1.5, ...
+%         'DisplayName', sprintf('舵角 %d^{\\circ}', current_angle));
 % 
 % end
 % 
