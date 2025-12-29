@@ -109,7 +109,7 @@ function [cmd_rpm, debug_info] = smc_speed_controller(state, target_u, dot_targe
     % 注意符号：趋近律是让 e 趋向于 0，即 du 趋向于 du_d
     
     %  修改版：考虑到 F_rest 包含在系统模型中
-    X_prop_req = m_kg * (dot_target_u - F_coupling/m_kg - (-c_epsilon * sat_s - c_k * s)) - F_rest;
+    X_prop_req = m_kg * (dot_target_u - F_coupling/m_kg + (-c_epsilon * sat_s - c_k * s)) - F_rest;
     
     %% 5. 推力分配与转速反解
     % model_jeff_b.m 中的推力模型:
@@ -127,7 +127,7 @@ function [cmd_rpm, debug_info] = smc_speed_controller(state, target_u, dot_targe
     Thrust_one_req_lbf = Thrust_one_req_N / LBF2N;
     
     % 5.2 计算推力系数 (Base - Loss)
-    XWIND_ft_s = -u / FT2M; % 简化的相对风速(假设无环境风)
+    XWIND_ft_s = u / FT2M; % 简化的相对风速
     
     Thrust_base = (338 * propeller_angle + 4.36 * propeller_angle^2);
     Thrust_loss = (1.43 * propeller_angle * XWIND_ft_s + 0.1715 * XWIND_ft_s^2);

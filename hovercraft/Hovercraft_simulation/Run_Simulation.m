@@ -9,7 +9,8 @@ y0 = 0;      % 东向位置 (m)
 z0 = 1.5;   % 垂向位移 (m)
 phi0 = 0;    % 横摇角 (rad)
 theta0 = 0;  % 纵摇角 (rad)
-psi0 = deg2rad(0); % 初始艏向 (rad)，0度为正北
+psi0 = deg2rad(45); % 初始艏向 (rad)，0度为正北
+
 
 % --- 速度 ---
 u0 = 0;      % 纵向速度 (m/s)
@@ -19,18 +20,22 @@ p0 = 0;      % 横摇角速度 (rad/s)
 q0 = 0;      % 纵摇角速度 (rad/s)
 r0 = 0;      % 艏摇角速度 (rad/s)
 
+
 % 组装初始状态向量
 X0 = [x0, y0, z0, phi0, theta0, psi0, u0, v0, w0, p0, q0, r0];
 
 %%
 % 控制指令
-rudder_angle = 5; % 舵角指令
+rudder_angle = 0; % 舵角指令
+target_u = 15;      % 期望航速u(m/s)
+dot_target_u = 0;   % 期望加速度
+
 
 
 %% 使用4阶龙格库塔法
 % 定义时间步长和总时长
 dt = 0.05;              
-T_end = 600;            % 仿真结束时间
+T_end = 200;            % 仿真结束时间
 t = 0:dt:T_end;         % 生成时间向量
 num_steps = length(t);  % 总步数
 
@@ -41,9 +46,11 @@ sol(1, :) = X0;         % 填入初始状态
 
 % 压强矩阵 P_hist_Pa: [行=时间步, 列=4个气室]
 P_hist_Pa = zeros(num_steps, 4);
+rpm_hist = zeros(num_steps, 1);  % 录RPM变化
+rpm_hist(1) = 900;               % 初始怠速
 
 % 计算初始时刻的压强
-[~, P_init] = model_jeff_b(t(1), X0'); 
+[~, P_init] = model_jeff_b(t(1), X0', rudder_angle, 900); 
 P_hist_Pa(1, :) = P_init(:)';
 
 fprintf('进行气垫船6自由度仿真...\n');
@@ -53,17 +60,19 @@ for k = 1 : num_steps - 1
     % 当前时刻和状态
     t_curr = t(k);
     X_curr = sol(k, :)'; % 取出为列向量 (12x1)
+
+    [cmd_rpm, debug_data] = smc_speed_controller(X_curr, target_u, dot_target_u, []);
     
     % --- RK4迭代 ---
-    [dX1, ~] = model_jeff_b(t_curr,          X_curr,              rudder_angle);
-    [dX2, ~] = model_jeff_b(t_curr + 0.5*dt, X_curr + 0.5*dt*dX1, rudder_angle);
-    [dX3, ~] = model_jeff_b(t_curr + 0.5*dt, X_curr + 0.5*dt*dX2, rudder_angle);
-    [dX4, ~] = model_jeff_b(t_curr + dt,     X_curr + dt*dX3,     rudder_angle);
+    [dX1, ~] = model_jeff_b(t_curr,          X_curr,              rudder_angle, cmd_rpm);
+    [dX2, ~] = model_jeff_b(t_curr + 0.5*dt, X_curr + 0.5*dt*dX1, rudder_angle, cmd_rpm);
+    [dX3, ~] = model_jeff_b(t_curr + 0.5*dt, X_curr + 0.5*dt*dX2, rudder_angle, cmd_rpm);
+    [dX4, ~] = model_jeff_b(t_curr + dt,     X_curr + dt*dX3,     rudder_angle, cmd_rpm);
     X_next = X_curr + (dt / 6) * (dX1 + 2*dX2 + 2*dX3 + dX4);
    
     sol(k+1, :) = X_next';
     
-    [~, P_out] = model_jeff_b(t(k+1), X_next, rudder_angle);
+    [~, P_out] = model_jeff_b(t(k+1), X_next, rudder_angle, cmd_rpm);
     P_hist_Pa(k+1, :) = P_out(:)';
     
 end
