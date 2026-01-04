@@ -1,4 +1,4 @@
-function [dXdt, P_cushion_out] = model_jeff_b(t, X, cmd_rudder_angle, cmd_propeller_rpm) 
+function [dXdt, P_cushion_out] = model_jeff_b(t, X, cmd_rudder_angle, cmd_propeller_rpms) 
     %% --- 单位转换系数 ---
     FT2M = 0.3048;          % feet to meters
     SLUG2KG = 14.5939;      % slugs to kg
@@ -49,16 +49,8 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X, cmd_rudder_angle, cmd_propel
     %% 控制输入 
     propeller_angle = 15;
 
-% %     propeller_speed_rpm = 1200;
-%     if t > 10
-%         propeller_speed_rpm = 1200;
-%     else
-%         propeller_speed_rpm = 1200;
-%     end
-
-    propeller_speed_rpm = cmd_propeller_rpm;
     
-    if t > 100
+    if t > 50
         rudder_angle_deg = cmd_rudder_angle;
     else
         rudder_angle_deg = 0;
@@ -67,7 +59,7 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X, cmd_rudder_angle, cmd_propel
     rudder_angle_rad = deg2rad(rudder_angle_deg);
     
     true_wind_speed_si = 0;       % 真风速
-    true_wind_direction_si = deg2rad(270);   % 真风来向
+    true_wind_direction_si = deg2rad(0);   % 真风来向
 
     %% 气垫几何参数
     % 气垫分布几何 
@@ -104,7 +96,7 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X, cmd_rudder_angle, cmd_propel
 %         Current_RPM = Target_RPM;
 %     end
 
-    Run_Up_Time = 60.0;
+    Run_Up_Time = 30;
     if t < Run_Up_Time
         Current_RPM = Target_RPM * (1 - exp(-0.5 * t/1));  % 指数上升，更平滑
     else
@@ -194,20 +186,57 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X, cmd_rudder_angle, cmd_propel
     
 
     %% 推进与舵力计算
+    Y_prop_dist_si = 2.5; 
+
+    % 解析左右转速指令
+    if length(cmd_propeller_rpms) == 2
+        raw_rpm_L = cmd_propeller_rpms(1);
+        raw_rpm_R = cmd_propeller_rpms(2);
+    else
+        % 兼容单输入的情况
+        raw_rpm_L = cmd_propeller_rpms;
+        raw_rpm_R = cmd_propeller_rpms;
+    end
+
+
+    if t > 30
+        rpm_L = raw_rpm_L;
+        rpm_R = raw_rpm_R;
+
+    else
+        rpm_L = 0;
+        rpm_R = 0;
+    end
+
+
     XWIND_ft_s = -u_rel * M2FT; 
     XWIND_val = XWIND_ft_s; 
     Thrust_base = (338 * propeller_angle + 4.36 * propeller_angle^2);
     Thrust_loss = (1.43 * propeller_angle * XWIND_val + 0.1715 * XWIND_val^2);
-    Thrust_one_lbf = (Thrust_base - Thrust_loss) * (propeller_speed_rpm/1250)^2;
+%     Thrust_one_lbf = (Thrust_base - Thrust_loss) * (propeller_speed_rpm/1250)^2;
+    K_Thrust = (Thrust_base - Thrust_loss);
+    % 分别计算左右推力 (Lbf)
+    Thrust_L_lbf = K_Thrust * (rpm_L/1250)^2;
+    Thrust_R_lbf = K_Thrust * (rpm_R/1250)^2;
+
     
     % 转换为牛顿
-    Thrust_one_si = Thrust_one_lbf * LBF2N;
-    
+%     Thrust_one_si = Thrust_one_lbf * LBF2N;
+    Thrust_L_si = Thrust_L_lbf * LBF2N;
+    Thrust_R_si = Thrust_R_lbf * LBF2N; 
+    Thrust_one_si = (Thrust_L_si + Thrust_R_si) / 2;
+
     % 总推力
-    X_propeller_thrust_si = 2 * Thrust_one_si;
+%     X_propeller_thrust_si = 2 * Thrust_one_si;
+    X_propeller_thrust_si = Thrust_L_si + Thrust_R_si;
 
     My_propeller_si = X_propeller_thrust_si * Z_propeller_pos_si;
     
+    % Yaw力矩,差速产生
+    Mz_propeller_si = (Thrust_L_si - Thrust_R_si) * Y_prop_dist_si;
+
+
+
     % 舵力
     VDUCT2_si = (apparent_wind_velocity_si * cos(apparent_wind_angle_rad))^2 + Thrust_one_si / (rho_air_SI * DUCT_AREA_si);
     if VDUCT2_si < 0, VDUCT2_si = 0; end
@@ -327,7 +356,7 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X, cmd_rudder_angle, cmd_propel
     Roll_Damping_Coeff = 5e5; 
     Mx_damping = -Roll_Damping_Coeff * p;
 
-    Pitch_Damping_Coeff = 2e6; 
+    Pitch_Damping_Coeff = 2e4; 
     My_damping = - Pitch_Damping_Coeff * q;
     Z_arm_effective = 1.0;
     My_skirt_moment = Z_arm_effective * X_skirt_si;
@@ -348,7 +377,7 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X, cmd_rudder_angle, cmd_propel
     
     Mx = Mx_cursion_si + Mx_air_si + Mx_rudder_si + Mx_skirt_moment + Mx_damping;
     My = My_cursion_si + My_air_si + My_rudder_si + My_propeller_si + My_skirt_moment + My_damping;
-    Mz = Mz_air_si + Mz_rudder_si + Mz_skirt_si;
+    Mz = Mz_air_si + Mz_rudder_si + Mz_skirt_si+ Mz_propeller_si;
     
     %% --- 8. 动力学方程 ---    
     udot = Fx/m_kg - q*w + r*v;

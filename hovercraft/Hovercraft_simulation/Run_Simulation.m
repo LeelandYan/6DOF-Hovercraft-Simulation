@@ -9,11 +9,11 @@ y0 = 0;      % 东向位置 (m)
 z0 = 1.5;   % 垂向位移 (m)
 phi0 = 0;    % 横摇角 (rad)
 theta0 = 0;  % 纵摇角 (rad)
-psi0 = deg2rad(45); % 初始艏向 (rad)，0度为正北
+psi0 = deg2rad(0); % 初始艏向 (rad)，0度为正北
 
 
 % --- 速度 ---
-u0 = 0;      % 纵向速度 (m/s)
+u0 = 0.01;      % 纵向速度 (m/s)
 v0 = 0;      % 横向速度 (m/s)
 w0 = 0;      % 垂向速度 (m/s)
 p0 = 0;      % 横摇角速度 (rad/s)
@@ -26,10 +26,10 @@ X0 = [x0, y0, z0, phi0, theta0, psi0, u0, v0, w0, p0, q0, r0];
 
 %%
 % 控制指令
-rudder_angle = 0; % 舵角指令
-target_u = 15;      % 期望航速u(m/s)
+rudder_angle = 10; % 舵角指令
+target_u = 13;      % 期望航速u(m/s)
 dot_target_u = 0;   % 期望加速度
-
+target_psi = deg2rad(0); % 期望航向
 
 
 %% 使用4阶龙格库塔法
@@ -46,12 +46,23 @@ sol(1, :) = X0;         % 填入初始状态
 
 % 压强矩阵 P_hist_Pa: [行=时间步, 列=4个气室]
 P_hist_Pa = zeros(num_steps, 4);
-rpm_hist = zeros(num_steps, 1);  % 录RPM变化
-rpm_hist(1) = 900;               % 初始怠速
+
+% 转速历史
+rpm_hist = zeros(num_steps, 2);  
+rpm_hist(1, :) = [0, 0];
 
 % 计算初始时刻的压强
 [~, P_init] = model_jeff_b(t(1), X0', rudder_angle, 900); 
 P_hist_Pa(1, :) = P_init(:)';
+
+% 控制分配所需的物理参数
+Y_prop_dist_si = 2.5;   % 螺旋桨离中心线的横向距离 
+LBF2N = 4.44822;        % 单位转换
+prop_angle_deg = 15;    % 螺旋桨安装角
+
+% 估算推力系数
+K_Thrust_Approx = (338 * prop_angle_deg + 4.36 * prop_angle_deg^2) * LBF2N;
+
 
 fprintf('进行气垫船6自由度仿真...\n');
 
@@ -61,21 +72,59 @@ for k = 1 : num_steps - 1
     t_curr = t(k);
     X_curr = sol(k, :)'; % 取出为列向量 (12x1)
 
-    [cmd_rpm, debug_data] = smc_speed_controller(X_curr, target_u, dot_target_u, []);
+    %% 控制器计算
+    % 速度控制 
+    [F_surge_req, debug_spd] = smc_speed_controller_adaptive(X_curr, target_u, dot_target_u, []);
     
-    % --- RK4迭代 ---
-    [dX1, ~] = model_jeff_b(t_curr,          X_curr,              rudder_angle, cmd_rpm);
-    [dX2, ~] = model_jeff_b(t_curr + 0.5*dt, X_curr + 0.5*dt*dX1, rudder_angle, cmd_rpm);
-    [dX3, ~] = model_jeff_b(t_curr + 0.5*dt, X_curr + 0.5*dt*dX2, rudder_angle, cmd_rpm);
-    [dX4, ~] = model_jeff_b(t_curr + dt,     X_curr + dt*dX3,     rudder_angle, cmd_rpm);
+    % 航向控制 
+
+    [Mz_req, debug_hdg] = smc_heading_controller(X_curr, target_psi);
+    
+    %% 控制分配 
+    % T_L + T_R = F_surge_req  (总推力)
+    % (T_L - T_R) * Y_arm = Mz_req (偏航力矩)
+    
+    delta_F = Mz_req / Y_prop_dist_si; % 产生力矩所需的推力差
+    delta_F = 0; % 启用这一项来测试纯舵回转
+    T_L_req = 0.5 * F_surge_req + 0.5 * delta_F;
+    T_R_req = 0.5 * F_surge_req - 0.5 * delta_F;
+    
+    % 物理约束与RPM反解
+    % 推力不能为负 
+    if T_L_req < 0, T_L_req = 0; end
+    if T_R_req < 0, T_R_req = 0; end
+    
+    % 反解转速
+    rpm_L = 1250 * sqrt(T_L_req / K_Thrust_Approx);
+    rpm_R = 1250 * sqrt(T_R_req / K_Thrust_Approx);
+    
+    % RPM 物理限幅
+    MAX_RPM = 2500;
+    rpm_L = min(rpm_L, MAX_RPM);
+    rpm_R = min(rpm_R, MAX_RPM);
+    
+    % 组装指令向量
+    cmd_rpm_vec = [rpm_L, rpm_R];
+    
+    % 记录转速历史
+    rpm_hist(k, :) = cmd_rpm_vec;
+    
+    [dX1, ~] = model_jeff_b(t_curr,          X_curr,              rudder_angle, cmd_rpm_vec);
+    [dX2, ~] = model_jeff_b(t_curr + 0.5*dt, X_curr + 0.5*dt*dX1, rudder_angle, cmd_rpm_vec);
+    [dX3, ~] = model_jeff_b(t_curr + 0.5*dt, X_curr + 0.5*dt*dX2, rudder_angle, cmd_rpm_vec);
+    [dX4, ~] = model_jeff_b(t_curr + dt,     X_curr + dt*dX3,     rudder_angle, cmd_rpm_vec);
+    
     X_next = X_curr + (dt / 6) * (dX1 + 2*dX2 + 2*dX3 + dX4);
-   
+    
     sol(k+1, :) = X_next';
     
-    [~, P_out] = model_jeff_b(t(k+1), X_next, rudder_angle, cmd_rpm);
+    % 记录压强
+    [~, P_out] = model_jeff_b(t(k+1), X_next, rudder_angle, cmd_rpm_vec);
     P_hist_Pa(k+1, :) = P_out(:)';
     
 end
+% 补全最后一步记录
+rpm_hist(num_steps, :) = rpm_hist(num_steps-1, :);
 
 fprintf('仿真完成。\n');
 
@@ -181,6 +230,23 @@ ylabel('侧滑角 (deg)');
 legend('侧滑角 \beta', 'Location', 'best');
 % ylim([-1.5, 1.5]);
 grid on;
+
+%%
+% 转速指令
+figure(9); 
+set(gcf, 'Name', 'Control Input Analysis', 'Color', 'w');
+
+% 分别绘制，使用不同颜色和线型
+plot(t, rpm_hist(:,1), 'r-', 'LineWidth', 1.5, 'DisplayName', '左侧'); hold on;
+plot(t, rpm_hist(:,2), 'b--', 'LineWidth', 1.5, 'DisplayName', '右测');
+
+title('螺旋桨转速指令 (Propeller RPM)');
+xlabel('时间 (s)');
+ylabel('转速 (RPM)');
+ylim([0, 2600]);
+legend('Location', 'best'); % 显示图例
+grid on;
+
 
 %% 气垫压强绘图
 figure('Name', 'Cushion Pressure Distribution', 'Color', 'w');
