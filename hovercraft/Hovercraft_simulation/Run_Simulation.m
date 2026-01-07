@@ -26,8 +26,8 @@ X0 = [x0, y0, z0, phi0, theta0, psi0, u0, v0, w0, p0, q0, r0];
 
 %%
 % 控制指令
-rudder_angle = 10; % 舵角指令
-target_u = 13;      % 期望航速u(m/s)
+rudder_angle = 0; % 舵角指令
+target_u = 20;      % 期望航速u(m/s)
 dot_target_u = 0;   % 期望加速度
 target_psi = deg2rad(0); % 期望航向
 
@@ -61,71 +61,63 @@ LBF2N = 4.44822;        % 单位转换
 prop_angle_deg = 15;    % 螺旋桨安装角
 
 % 估算推力系数
-K_Thrust_Approx = (338 * prop_angle_deg + 4.36 * prop_angle_deg^2) * LBF2N;
-
+K_Thrust_Constant = ((338 * 15 + 4.36 * 15^2) * 4.44822) / (1250^2);
+MAX_RPM = 2500;
 
 fprintf('进行气垫船6自由度仿真...\n');
 
 % RK4循环
 for k = 1 : num_steps - 1
-    % 当前时刻和状态
     t_curr = t(k);
-    X_curr = sol(k, :)'; % 取出为列向量 (12x1)
+    X_curr = sol(k, :)'; 
 
     %% 控制器计算
-    % 速度控制 
-    [F_surge_req, debug_spd] = smc_speed_controller_adaptive(X_curr, target_u, dot_target_u, []);
+    % 航速控制 
+    F_surge_req = smc_speed_controller_eso(X_curr, target_u, dot_target_u);
     
     % 航向控制 
-
-    [Mz_req, debug_hdg] = smc_heading_controller(X_curr, target_psi);
+    [Mz_req, ~] = smc_heading_controller(X_curr, target_psi);
     
-    %% 控制分配 
-    % T_L + T_R = F_surge_req  (总推力)
-    % (T_L - T_R) * Y_arm = Mz_req (偏航力矩)
+    %% 控制分配
+    % 逻辑：总推力用于速度，差动推力用于转向
+    % T_L = 0.5*F + 0.5*dF
+    % T_R = 0.5*F - 0.5*dF
     
-    delta_F = Mz_req / Y_prop_dist_si; % 产生力矩所需的推力差
-    delta_F = 0; % 启用这一项来测试纯舵回转
-    T_L_req = 0.5 * F_surge_req + 0.5 * delta_F;
-    T_R_req = 0.5 * F_surge_req - 0.5 * delta_F;
+    thrust_diff = Mz_req / Y_prop_dist_si; % 力矩转为推力差
     
-    % 物理约束与RPM反解
-    % 推力不能为负 
-    if T_L_req < 0, T_L_req = 0; end
-    if T_R_req < 0, T_R_req = 0; end
+    T_L_req = 0.5 * (F_surge_req + thrust_diff);
+    T_R_req = 0.5 * (F_surge_req - thrust_diff);
     
-    % 反解转速
-    rpm_L = 1250 * sqrt(T_L_req / K_Thrust_Approx);
-    rpm_R = 1250 * sqrt(T_R_req / K_Thrust_Approx);
+    % 物理约束 
+    T_L_req = max(0, T_L_req);
+    T_R_req = max(0, T_R_req);
     
-    % RPM 物理限幅
-    MAX_RPM = 2500;
+    %% 执行器反解
+    rpm_L = sqrt(T_L_req / K_Thrust_Constant);
+    rpm_R = sqrt(T_R_req / K_Thrust_Constant);
+    
+    % RPM 限幅
     rpm_L = min(rpm_L, MAX_RPM);
     rpm_R = min(rpm_R, MAX_RPM);
     
-    % 组装指令向量
     cmd_rpm_vec = [rpm_L, rpm_R];
+    rpm_hist(k, :) = cmd_rpm_vec; % 记录
     
-    % 记录转速历史
-    rpm_hist(k, :) = cmd_rpm_vec;
-    
+    %% 求解器
     [dX1, ~] = model_jeff_b(t_curr,          X_curr,              rudder_angle, cmd_rpm_vec);
     [dX2, ~] = model_jeff_b(t_curr + 0.5*dt, X_curr + 0.5*dt*dX1, rudder_angle, cmd_rpm_vec);
     [dX3, ~] = model_jeff_b(t_curr + 0.5*dt, X_curr + 0.5*dt*dX2, rudder_angle, cmd_rpm_vec);
     [dX4, ~] = model_jeff_b(t_curr + dt,     X_curr + dt*dX3,     rudder_angle, cmd_rpm_vec);
     
     X_next = X_curr + (dt / 6) * (dX1 + 2*dX2 + 2*dX3 + dX4);
-    
     sol(k+1, :) = X_next';
     
-    % 记录压强
     [~, P_out] = model_jeff_b(t(k+1), X_next, rudder_angle, cmd_rpm_vec);
     P_hist_Pa(k+1, :) = P_out(:)';
-    
 end
-% 补全最后一步记录
-rpm_hist(num_steps, :) = rpm_hist(num_steps-1, :);
 
+% 记录
+rpm_hist(num_steps, :) = rpm_hist(num_steps-1, :);
 fprintf('仿真完成。\n');
 
 %% 数据解包 

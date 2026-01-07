@@ -185,19 +185,18 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X, cmd_rudder_angle, cmd_propel
      Mz_air_si = Y_air_si * X_air_pos_si;
     
 
-    %% 推进与舵力计算
+%% 推进与舵力计算
     Y_prop_dist_si = 2.5; 
 
-    % 解析左右转速指令
+    % 左右转速指令
     if length(cmd_propeller_rpms) == 2
         raw_rpm_L = cmd_propeller_rpms(1);
         raw_rpm_R = cmd_propeller_rpms(2);
     else
-        % 兼容单输入的情况
+        % 单输入的情况
         raw_rpm_L = cmd_propeller_rpms;
         raw_rpm_R = cmd_propeller_rpms;
     end
-
 
     if t > 30
         rpm_L = raw_rpm_L;
