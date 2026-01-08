@@ -13,7 +13,7 @@ psi0 = deg2rad(0); % 初始艏向 (rad)，0度为正北
 
 
 % --- 速度 ---
-u0 = 0.01;      % 纵向速度 (m/s)
+u0 = 0;      % 纵向速度 (m/s)
 v0 = 0;      % 横向速度 (m/s)
 w0 = 0;      % 垂向速度 (m/s)
 p0 = 0;      % 横摇角速度 (rad/s)
@@ -27,7 +27,7 @@ X0 = [x0, y0, z0, phi0, theta0, psi0, u0, v0, w0, p0, q0, r0];
 %%
 % 控制指令
 rudder_angle = 0; % 舵角指令
-target_u = 20;      % 期望航速u(m/s)
+target_u = 9;      % 期望航速u(m/s)
 dot_target_u = 0;   % 期望加速度
 target_psi = deg2rad(0); % 期望航向
 
@@ -35,7 +35,7 @@ target_psi = deg2rad(0); % 期望航向
 %% 使用4阶龙格库塔法
 % 定义时间步长和总时长
 dt = 0.05;              
-T_end = 200;            % 仿真结束时间
+T_end = 100;            % 仿真结束时间
 t = 0:dt:T_end;         % 生成时间向量
 num_steps = length(t);  % 总步数
 
@@ -74,12 +74,14 @@ for k = 1 : num_steps - 1
     %% 控制器计算
     % 航速控制 
     F_surge_req = smc_speed_controller_eso(X_curr, target_u, dot_target_u);
-    
+%     F_surge_req = smc_speed_controller(X_curr, target_u, dot_target_u);
+
     % 航向控制 
     [Mz_req, ~] = smc_heading_controller(X_curr, target_psi);
+%     Mz_req = 0; % 操舵回转
     
-    %% 控制分配
-    % 逻辑：总推力用于速度，差动推力用于转向
+    %% 推力分配
+    % 总推力用于速度，差动推力用于转向
     % T_L = 0.5*F + 0.5*dF
     % T_R = 0.5*F - 0.5*dF
     
@@ -158,7 +160,7 @@ plot(t, u, 'LineWidth', 1.5);
 title('纵向速度 u (m/s)'); 
 grid on; 
 xlabel('时间 (s)');
-% ylim([-10, 10]);
+% ylim([0, 25]);
 
 figure(2); 
 plot(t, v, 'LineWidth', 1.5); 
@@ -228,11 +230,12 @@ grid on;
 figure(9); 
 set(gcf, 'Name', 'Control Input Analysis', 'Color', 'w');
 
-% 分别绘制，使用不同颜色和线型
 plot(t, rpm_hist(:,1), 'r-', 'LineWidth', 1.5, 'DisplayName', '左侧'); hold on;
 plot(t, rpm_hist(:,2), 'b--', 'LineWidth', 1.5, 'DisplayName', '右测');
 
-title('螺旋桨转速指令 (Propeller RPM)');
+% plot(t, rpm_hist(:,1), 'b-', 'LineWidth', 1.5, 'DisplayName', '转速指令');
+
+title('螺旋桨转速指令');
 xlabel('时间 (s)');
 ylabel('转速 (RPM)');
 ylim([0, 2600]);

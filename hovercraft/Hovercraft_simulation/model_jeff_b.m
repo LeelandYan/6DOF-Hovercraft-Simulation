@@ -59,7 +59,7 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X, cmd_rudder_angle, cmd_propel
     rudder_angle_rad = deg2rad(rudder_angle_deg);
     
     true_wind_speed_si = 0;       % 真风速
-    true_wind_direction_si = deg2rad(0);   % 真风来向
+    true_wind_direction_si = deg2rad(180);   % 真风来向
 
     %% 气垫几何参数
     % 气垫分布几何 
@@ -84,8 +84,7 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X, cmd_rudder_angle, cmd_propel
     C_SKRT = 0.0112;                % 围裙刚度系数
     TC = 8.0;                       % 围裙响应时间常数
     
-%     N_FAN_L = 1500;                 % 左风机转速 RPM
-%     N_FAN_R = 1500;                 % 右风机转速 RPM    
+  
 
     Target_RPM = 1800;
 %     Run_Up_Time = 20.0; 
