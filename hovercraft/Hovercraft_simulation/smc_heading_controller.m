@@ -9,20 +9,19 @@ function [Mz_cmd, debug_data] = smc_heading_controller(state, target_psi)
     while e_psi < -pi, e_psi = e_psi + 2*pi; end
     
     % 滑模面定义
-    % s = r_error + lambda * e_psi (这里目标 r 为 0)
-    c_lambda = 2.0; 
-    s = r + c_lambda * (-e_psi); 
+    lambda = 2.0; 
+    s = r + lambda * (-e_psi); 
     
     % 控制律
 
     
     Izz = 2.057e7 * 14.5939 * (0.3048^2); % 估算的转动惯量
     
-    k_prop = 10.0;  % 比例增益
-    k_sat  = 50000;  % 饱和增益 (最大力矩限制)
+    k = 10.0;  % 比例增益
+    yita = 0.5;
     epsilon = 0.5; % 边界层厚度
     
-    % 
+     
     if abs(s) < epsilon
         sat_s = s / epsilon;
     else
@@ -30,7 +29,7 @@ function [Mz_cmd, debug_data] = smc_heading_controller(state, target_psi)
     end
     
     % 计算期望力矩 
-    Mz_cmd = -Izz * ( k_prop * s + 0.5 * sat_s ); 
+    Mz_cmd = -Izz * ( k * s + yita * sat_s ); 
     
     % 限幅
     MAX_MOMENT = 60000; 

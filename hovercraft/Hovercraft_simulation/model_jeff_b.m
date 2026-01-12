@@ -58,8 +58,8 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X, cmd_rudder_angle, cmd_propel
 
     rudder_angle_rad = deg2rad(rudder_angle_deg);
     
-    true_wind_speed_si = 0;       % 真风速
-    true_wind_direction_si = deg2rad(180);   % 真风来向
+    true_wind_speed_si = 3;       % 真风速
+    true_wind_direction_si = deg2rad(90);   % 真风来向
 
     %% 气垫几何参数
     % 气垫分布几何 
@@ -197,10 +197,10 @@ function [dXdt, P_cushion_out] = model_jeff_b(t, X, cmd_rudder_angle, cmd_propel
         raw_rpm_R = cmd_propeller_rpms;
     end
 
+    % 推力作用时间
     if t > 30
         rpm_L = raw_rpm_L;
         rpm_R = raw_rpm_R;
-
     else
         rpm_L = 0;
         rpm_R = 0;

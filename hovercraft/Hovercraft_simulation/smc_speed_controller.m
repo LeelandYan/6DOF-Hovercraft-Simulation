@@ -38,7 +38,7 @@ function [X_prop_req, cmd_rpm] = smc_speed_controller(state, target_u, dot_targe
     q     = state(11);
     r     = state(12);
 
-    %% 动力学耦合项计算
+    %% 动力学项计算
     F_coupling = m_kg * (-q*w + r*v);
 
     %% 滑模控制律计算
